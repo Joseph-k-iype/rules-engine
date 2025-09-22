@@ -1,5 +1,5 @@
 """
-Base data models for the legislation rules converter.
+Base data models for the legislation rules converter with decision-making capabilities.
 """
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union
@@ -7,12 +7,54 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 from .enums import (
     DataDomain, DataRole, DataCategory, ConditionOperator, 
-    DocumentLevel, ProcessingPurpose, LegalBasis
+    DocumentLevel, ProcessingPurpose, LegalBasis,
+    DecisionType, DecisionContext, RequiredActionType
 )
 
 
+class DecisionOutcome(BaseModel):
+    """Decision outcome for rule-based decision making."""
+    model_config = ConfigDict(use_enum_values=True)
+
+    decision: DecisionType = Field(..., description="The decision: yes, no, maybe, or unknown")
+    context: DecisionContext = Field(..., description="Context in which the decision applies")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence in the decision")
+    
+    # Conditional requirements (for "maybe" decisions)
+    required_actions: List[RequiredActionType] = Field(default_factory=list, description="Actions required for conditional approval")
+    required_conditions: List[str] = Field(default_factory=list, description="Conditions that must be met")
+    
+    # Reasoning
+    decision_reasoning: str = Field(..., description="Explanation for why this decision was made")
+    legislative_basis: str = Field(..., description="Legislative text supporting this decision")
+    
+    # Metadata
+    applicable_scenarios: List[str] = Field(default_factory=list, description="Scenarios where this decision applies")
+    exceptions: List[str] = Field(default_factory=list, description="Exceptions to this decision")
+
+    @field_validator('decision', mode='before')
+    @classmethod
+    def validate_decision(cls, v):
+        if isinstance(v, str):
+            try:
+                return DecisionType(v.lower())
+            except ValueError:
+                return DecisionType.UNKNOWN
+        return v
+
+    @field_validator('context', mode='before')
+    @classmethod
+    def validate_context(cls, v):
+        if isinstance(v, str):
+            try:
+                return DecisionContext(v.lower())
+            except ValueError:
+                return DecisionContext.DATA_PROCESSING
+        return v
+
+
 class RuleAction(BaseModel):
-    """Action that can be taken based on a rule - inferred from legislation."""
+    """Action that can be taken based on a rule - inferred from legislation with decision context."""
     model_config = ConfigDict(use_enum_values=True)
 
     id: str = Field(..., description="Unique action identifier")
@@ -20,6 +62,10 @@ class RuleAction(BaseModel):
     title: str = Field(..., description="Action title in simple English")
     description: str = Field(..., description="What must be done in simple English")
     priority: str = Field(..., description="Action priority based on legislative language")
+
+    # Decision-making capabilities
+    enables_decision: Optional[DecisionOutcome] = Field(None, description="Decision this action enables or affects")
+    required_for_decision: Optional[DecisionType] = Field(None, description="Decision type this action is required for")
 
     # Implementation details
     data_specific_steps: List[str] = Field(..., description="Specific steps for data handling")
@@ -38,9 +84,21 @@ class RuleAction(BaseModel):
     applicable_countries: List[str] = Field(default_factory=list, description="Countries where action applies")
     confidence_score: float = Field(..., ge=0.0, le=1.0, description="Confidence in action relevance")
 
+    @field_validator('required_for_decision', mode='before')
+    @classmethod
+    def validate_required_for_decision(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                return DecisionType(v.lower())
+            except ValueError:
+                return None
+        return v
+
 
 class UserAction(BaseModel):
-    """Specific user action inferred from legislation."""
+    """Specific user action inferred from legislation with decision context."""
     model_config = ConfigDict(use_enum_values=True)
 
     id: str = Field(..., description="Unique user action identifier")
@@ -48,6 +106,10 @@ class UserAction(BaseModel):
     title: str = Field(..., description="Clear action title in simple English")
     description: str = Field(..., description="What the user must do in simple English")
     priority: str = Field(..., description="Priority level based on legislative context")
+
+    # Decision-making capabilities
+    enables_decision: Optional[DecisionOutcome] = Field(None, description="Decision this user action enables")
+    decision_impact: Optional[str] = Field(None, description="How this action affects decision outcomes")
 
     # User-specific implementation details
     user_data_steps: List[str] = Field(..., description="Concrete steps for user data handling")
@@ -67,8 +129,41 @@ class UserAction(BaseModel):
     confidence_score: float = Field(..., ge=0.0, le=1.0, description="Confidence in action inference")
 
 
+class DecisionRule(BaseModel):
+    """Rule specifically for decision-making based on conditions."""
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: str = Field(..., description="Unique decision rule identifier")
+    question: str = Field(..., description="The question this rule answers (e.g., 'Can data be transferred?')")
+    context: DecisionContext = Field(..., description="Decision context")
+    
+    # Decision logic
+    default_decision: DecisionType = Field(..., description="Default decision if no conditions are met")
+    conditional_decisions: List[Dict[str, Any]] = Field(default_factory=list, description="Conditional decision mappings")
+    
+    # Requirements for each decision type
+    requirements_for_yes: List[str] = Field(default_factory=list, description="Requirements for 'yes' decision")
+    requirements_for_maybe: List[RequiredActionType] = Field(default_factory=list, description="Actions required for 'maybe' decision")
+    reasons_for_no: List[str] = Field(default_factory=list, description="Reasons for 'no' decision")
+    
+    # Metadata
+    source_rule_id: str = Field(..., description="ID of the source legislation rule")
+    confidence_score: float = Field(..., ge=0.0, le=1.0, description="Confidence in decision logic")
+    applicable_scenarios: List[str] = Field(default_factory=list, description="Scenarios where this decision rule applies")
+
+    @field_validator('context', mode='before')
+    @classmethod
+    def validate_context(cls, v):
+        if isinstance(v, str):
+            try:
+                return DecisionContext(v.lower())
+            except ValueError:
+                return DecisionContext.DATA_PROCESSING
+        return v
+
+
 class RuleCondition(BaseModel):
-    """Individual condition within a rule."""
+    """Individual condition within a rule with decision impact."""
     model_config = ConfigDict(use_enum_values=True)
 
     fact: str = Field(..., description="The fact/data point to evaluate")
@@ -81,6 +176,10 @@ class RuleCondition(BaseModel):
     reasoning: str = Field(..., description="LLM reasoning for why this condition was extracted")
     document_level: DocumentLevel = Field(..., description="Document level this condition was extracted from")
     chunk_reference: Optional[str] = Field(None, description="Reference to source chunk if document was chunked")
+
+    # Decision impact
+    decision_impact: Optional[DecisionType] = Field(None, description="How this condition affects decisions")
+    conditional_requirement: Optional[RequiredActionType] = Field(None, description="Action required if condition is met")
 
     @field_validator('data_domain', mode='before')
     @classmethod
@@ -114,35 +213,24 @@ class RuleCondition(BaseModel):
             return v
         return None
 
-    @field_validator('operator', mode='before')
+    @field_validator('decision_impact', mode='before')
     @classmethod
-    def validate_operator(cls, v):
+    def validate_decision_impact(cls, v):
+        if v is None:
+            return None
         if isinstance(v, str):
             try:
-                return ConditionOperator(v)
+                return DecisionType(v.lower())
             except ValueError:
-                return ConditionOperator.EQUAL
-        elif isinstance(v, ConditionOperator):
-            return v
-        return ConditionOperator.EQUAL
-
-    @field_validator('document_level', mode='before')
-    @classmethod
-    def validate_document_level(cls, v):
-        if isinstance(v, str):
-            try:
-                return DocumentLevel(v)
-            except ValueError:
-                return DocumentLevel.LEVEL_1
-        elif isinstance(v, DocumentLevel):
-            return v
-        return DocumentLevel.LEVEL_1
+                return None
+        return v
 
 
 class RuleEvent(BaseModel):
     """Event triggered when rule conditions are met."""
     type: str = Field(..., description="Type of event/action")
     params: Dict[str, Any] = Field(default_factory=dict, description="Event parameters")
+    decision_context: Optional[DecisionContext] = Field(None, description="Decision context for this event")
 
 
 class CountryMetadata(BaseModel):
@@ -175,10 +263,14 @@ class DocumentChunk:
 
 
 class IntegratedRule(BaseModel):
-    """Unified rule that combines DPV, ODRL, and ODRE elements."""
+    """Unified rule that combines DPV, ODRL, and ODRE elements with decision-making."""
 
     id: str = Field(..., description="Unique rule identifier")
     type: str = Field(default="odre:EnforceablePolicy", description="Unified rule type")
+
+    # Decision-making capabilities
+    primary_decision: Optional[DecisionOutcome] = Field(None, description="Primary decision this rule enables")
+    decision_rules: List[DecisionRule] = Field(default_factory=list, description="Specific decision rules derived from this rule")
 
     # DPV Properties - Updated for v2.1
     dpv_hasProcessing: List[str] = Field(default_factory=list, description="DPV: Processing operations")
@@ -189,9 +281,10 @@ class IntegratedRule(BaseModel):
     dpv_hasLegalBasis: Optional[str] = Field(None, description="DPV: Legal basis for processing")
     dpv_hasLocation: List[str] = Field(default_factory=list, description="DPV: Processing locations/countries")
 
-    # DPV Actions - Dynamically inferred
+    # DPV Actions - Dynamically inferred with decision context
     dpv_hasRuleAction: List[str] = Field(default_factory=list, description="DPV: Rule actions inferred from legislation")
     dpv_hasUserAction: List[str] = Field(default_factory=list, description="DPV: User actions inferred from legislation")
+    dpv_hasDecisionAction: List[str] = Field(default_factory=list, description="DPV: Decision-enabling actions")
 
     # ODRL Properties
     odrl_permission: List[Dict[str, Any]] = Field(default_factory=list, description="ODRL: Permissions")
@@ -200,9 +293,10 @@ class IntegratedRule(BaseModel):
 
     # ODRE Properties
     odre_enforceable: bool = Field(default=True, description="ODRE: Enforceable flag")
-    odre_enforcement_mode: str = Field(default="dual_action_based", description="ODRE: Enforcement mode")
+    odre_enforcement_mode: str = Field(default="decision_based", description="ODRE: Enforcement mode")
     odre_action_inference: bool = Field(default=True, description="ODRE: Action inference enabled")
     odre_user_action_inference: bool = Field(default=True, description="ODRE: User action inference enabled")
+    odre_decision_inference: bool = Field(default=True, description="ODRE: Decision inference enabled")
 
     # Processing metadata
     source_document_levels: List[str] = Field(default_factory=list, description="Document levels processed")
