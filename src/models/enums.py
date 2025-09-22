@@ -1,5 +1,6 @@
 """
-Enumeration classes for the legislation rules converter with decision-making capabilities.
+Enumeration classes for the legislation rules converter.
+Enhanced with decision-making capabilities.
 """
 from enum import Enum
 
@@ -74,41 +75,31 @@ class LegalBasis(str, Enum):
     LEGITIMATE_INTERESTS = "legitimate_interests"
 
 
+class DecisionOutcome(str, Enum):
+    """Decision outcomes for rule evaluation."""
+    YES = "yes"
+    NO = "no"
+    MAYBE = "maybe"
+
+
 class DecisionType(str, Enum):
-    """Decision types for rule-based outcomes."""
-    YES = "yes"           # Action is allowed unconditionally
-    NO = "no"            # Action is prohibited/forbidden
-    MAYBE = "maybe"      # Action is allowed conditionally (requires additional steps)
-    UNKNOWN = "unknown"  # Decision cannot be determined from available information
+    """Types of decisions that can be made."""
+    DATA_TRANSFER = "data_transfer"
+    DATA_PROCESSING = "data_processing"
+    DATA_COLLECTION = "data_collection"
+    DATA_STORAGE = "data_storage"
+    DATA_DELETION = "data_deletion"
+    CONSENT_REQUIREMENT = "consent_requirement"
+    ACCESS_PERMISSION = "access_permission"
+    SHARING_PERMISSION = "sharing_permission"
+    COMPLIANCE_STATUS = "compliance_status"
 
 
 class DecisionContext(str, Enum):
-    """Context for decision-making."""
-    DATA_TRANSFER = "data_transfer"
-    DATA_PROCESSING = "data_processing"
-    DATA_STORAGE = "data_storage"
-    DATA_COLLECTION = "data_collection"
-    DATA_SHARING = "data_sharing"
-    DATA_DELETION = "data_deletion"
-    CONSENT_MANAGEMENT = "consent_management"
-    RIGHTS_EXERCISE = "rights_exercise"
-    COMPLIANCE_VERIFICATION = "compliance_verification"
-
-
-class RequiredActionType(str, Enum):
-    """Types of actions required for conditional decisions."""
-    DATA_MASKING = "data_masking"
-    DATA_ENCRYPTION = "data_encryption"
-    DATA_ANONYMIZATION = "data_anonymization"
-    CONSENT_OBTAINMENT = "consent_obtainment"
-    CONSENT_VERIFICATION = "consent_verification"
-    LEGAL_BASIS_ESTABLISHMENT = "legal_basis_establishment"
-    ADEQUACY_VERIFICATION = "adequacy_verification"
-    SAFEGUARDS_IMPLEMENTATION = "safeguards_implementation"
-    DOCUMENTATION_COMPLETION = "documentation_completion"
-    AUDIT_COMPLETION = "audit_completion"
-    APPROVAL_OBTAINMENT = "approval_obtainment"
-    NOTIFICATION_COMPLETION = "notification_completion"
-    IMPACT_ASSESSMENT = "impact_assessment"
-    SECURITY_MEASURES = "security_measures"
-    ACCESS_CONTROLS = "access_controls"
+    """Context in which decisions are made."""
+    CROSS_BORDER_TRANSFER = "cross_border_transfer"
+    INTERNAL_PROCESSING = "internal_processing"
+    THIRD_PARTY_SHARING = "third_party_sharing"
+    DATA_SUBJECT_REQUEST = "data_subject_request"
+    REGULATORY_COMPLIANCE = "regulatory_compliance"
+    SECURITY_ASSESSMENT = "security_assessment"

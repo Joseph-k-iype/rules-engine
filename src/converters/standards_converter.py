@@ -1,17 +1,18 @@
 """
-Standards converter for DPV, ODRL, and ODRE integration with decision-making capabilities.
+Standards converter for DPV, ODRL, and ODRE integration.
+Enhanced with decision-making capabilities.
 """
 from datetime import datetime
 from typing import Dict, Any, List
 
 from ..models.rules import LegislationRule
-from ..models.base_models import IntegratedRule, DecisionOutcome
-from ..models.enums import ProcessingPurpose, LegalBasis, DecisionType, DecisionContext, RequiredActionType
+from ..models.base_models import IntegratedRule
+from ..models.enums import ProcessingPurpose, LegalBasis
 from ..config import Config
 
 
 class DPVConcepts:
-    """DPV (Data Privacy Vocabulary) concept mappings with GDPR-compliant processing purposes and decision concepts."""
+    """DPV (Data Privacy Vocabulary) concept mappings with GDPR-compliant processing purposes and decision support."""
 
     # Updated DPV Core Namespaces v2.1
     DPV = Config.DPV_NAMESPACE
@@ -19,9 +20,6 @@ class DPVConcepts:
     DPV_TECH = Config.DPV_TECH_NAMESPACE
     DPV_LEGAL = Config.DPV_LEGAL_NAMESPACE
     DPV_ACTION = Config.ACTION_NAMESPACE
-    
-    # Decision Framework Namespace
-    DECISION = "https://w3id.org/decision-framework#"
 
     # GDPR-Compliant Processing Purposes
     PROCESSING_PURPOSES = {
@@ -72,44 +70,32 @@ class DPVConcepts:
         "data_subject": f"{DPV}DataSubject"
     }
 
-    # Decision Types Mapping
+    # Decision mappings for DPV
     DECISION_TYPES = {
-        DecisionType.YES.value: f"{DECISION}PermittedDecision",
-        DecisionType.NO.value: f"{DECISION}ProhibitedDecision", 
-        DecisionType.MAYBE.value: f"{DECISION}ConditionalDecision",
-        DecisionType.UNKNOWN.value: f"{DECISION}UnknownDecision"
+        "data_transfer": f"{DPV_ACTION}DataTransferDecision",
+        "data_processing": f"{DPV_ACTION}DataProcessingDecision",
+        "data_collection": f"{DPV_ACTION}DataCollectionDecision",
+        "data_storage": f"{DPV_ACTION}DataStorageDecision",
+        "data_deletion": f"{DPV_ACTION}DataDeletionDecision",
+        "consent_requirement": f"{DPV_ACTION}ConsentDecision",
+        "access_permission": f"{DPV_ACTION}AccessDecision",
+        "sharing_permission": f"{DPV_ACTION}SharingDecision",
+        "compliance_status": f"{DPV_ACTION}ComplianceDecision"
     }
 
-    # Decision Contexts Mapping
     DECISION_CONTEXTS = {
-        DecisionContext.DATA_TRANSFER.value: f"{DECISION}DataTransferContext",
-        DecisionContext.DATA_PROCESSING.value: f"{DECISION}DataProcessingContext",
-        DecisionContext.DATA_STORAGE.value: f"{DECISION}DataStorageContext",
-        DecisionContext.DATA_COLLECTION.value: f"{DECISION}DataCollectionContext",
-        DecisionContext.DATA_SHARING.value: f"{DECISION}DataSharingContext",
-        DecisionContext.DATA_DELETION.value: f"{DECISION}DataDeletionContext",
-        DecisionContext.CONSENT_MANAGEMENT.value: f"{DECISION}ConsentManagementContext",
-        DecisionContext.RIGHTS_EXERCISE.value: f"{DECISION}RightsExerciseContext",
-        DecisionContext.COMPLIANCE_VERIFICATION.value: f"{DECISION}ComplianceVerificationContext"
+        "cross_border_transfer": f"{DPV_ACTION}CrossBorderContext",
+        "internal_processing": f"{DPV_ACTION}InternalProcessingContext",
+        "third_party_sharing": f"{DPV_ACTION}ThirdPartySharingContext",
+        "data_subject_request": f"{DPV_ACTION}DataSubjectRequestContext",
+        "regulatory_compliance": f"{DPV_ACTION}RegulatoryComplianceContext",
+        "security_assessment": f"{DPV_ACTION}SecurityAssessmentContext"
     }
 
-    # Required Action Types Mapping
-    REQUIRED_ACTIONS = {
-        RequiredActionType.DATA_MASKING.value: f"{DPV_ACTION}DataMasking",
-        RequiredActionType.DATA_ENCRYPTION.value: f"{DPV_ACTION}DataEncryption",
-        RequiredActionType.DATA_ANONYMIZATION.value: f"{DPV_ACTION}DataAnonymization",
-        RequiredActionType.CONSENT_OBTAINMENT.value: f"{DPV_ACTION}ConsentObtainment",
-        RequiredActionType.CONSENT_VERIFICATION.value: f"{DPV_ACTION}ConsentVerification",
-        RequiredActionType.LEGAL_BASIS_ESTABLISHMENT.value: f"{DPV_ACTION}LegalBasisEstablishment",
-        RequiredActionType.ADEQUACY_VERIFICATION.value: f"{DPV_ACTION}AdequacyVerification",
-        RequiredActionType.SAFEGUARDS_IMPLEMENTATION.value: f"{DPV_ACTION}SafeguardsImplementation",
-        RequiredActionType.DOCUMENTATION_COMPLETION.value: f"{DPV_ACTION}DocumentationCompletion",
-        RequiredActionType.AUDIT_COMPLETION.value: f"{DPV_ACTION}AuditCompletion",
-        RequiredActionType.APPROVAL_OBTAINMENT.value: f"{DPV_ACTION}ApprovalObtainment",
-        RequiredActionType.NOTIFICATION_COMPLETION.value: f"{DPV_ACTION}NotificationCompletion",
-        RequiredActionType.IMPACT_ASSESSMENT.value: f"{DPV_ACTION}ImpactAssessment",
-        RequiredActionType.SECURITY_MEASURES.value: f"{DPV_ACTION}SecurityMeasures",
-        RequiredActionType.ACCESS_CONTROLS.value: f"{DPV_ACTION}AccessControls"
+    DECISION_OUTCOMES = {
+        "yes": f"{DPV_ACTION}PermittedOutcome",
+        "no": f"{DPV_ACTION}ProhibitedOutcome",
+        "maybe": f"{DPV_ACTION}ConditionalOutcome"
     }
 
     # Dynamic action mapping (no hardcoded actions)
@@ -120,21 +106,24 @@ class DPVConcepts:
         action_name = ''.join(word.capitalize() for word in action_type.replace('_', ' ').split())
         return f"{cls.DPV_ACTION}{action_prefix}{action_name}"
 
+    # Dynamic decision mapping
     @classmethod
-    def get_decision_action_uri(cls, action_type: str) -> str:
-        """Generate decision-enabling action URI dynamically."""
-        action_name = ''.join(word.capitalize() for word in action_type.replace('_', ' ').split())
-        return f"{cls.DECISION}Enable{action_name}Decision"
+    def get_decision_uri(cls, decision_type: str, decision_context: str, outcome: str) -> str:
+        """Generate decision URI dynamically based on decision components."""
+        decision_name = ''.join(word.capitalize() for word in decision_type.replace('_', ' ').split())
+        context_name = ''.join(word.capitalize() for word in decision_context.replace('_', ' ').split())
+        outcome_name = ''.join(word.capitalize() for word in outcome.split())
+        return f"{cls.DPV_ACTION}{decision_name}{context_name}{outcome_name}"
 
 
 class StandardsConverter:
-    """Converts between JSON Rules Engine and integrated DPV+ODRL+ODRE format with decision-making capabilities."""
+    """Converts between JSON Rules Engine and integrated DPV+ODRL+ODRE format with decision support."""
 
     def __init__(self):
         self.dpv_concepts = DPVConcepts()
 
     def json_rules_to_integrated(self, legislation_rule: LegislationRule) -> IntegratedRule:
-        """Convert JSON Rules Engine rule to integrated format with decision capabilities."""
+        """Convert JSON Rules Engine rule to integrated format with decision support."""
 
         # Extract DPV elements
         dpv_elements = self._extract_dpv_elements(legislation_rule)
@@ -142,14 +131,11 @@ class StandardsConverter:
         # Extract ODRL elements  
         odrl_elements = self._extract_odrl_elements(legislation_rule)
 
-        # Extract decision elements
-        decision_elements = self._extract_decision_elements(legislation_rule)
-
         # Create integrated rule
-        return self._create_integrated_rule(legislation_rule, dpv_elements, odrl_elements, decision_elements)
+        return self._create_integrated_rule(legislation_rule, dpv_elements, odrl_elements)
 
     def _extract_dpv_elements(self, legislation_rule: LegislationRule) -> Dict[str, Any]:
-        """Extract DPV elements from legislation rule with dynamic action mapping and decision context."""
+        """Extract DPV elements from legislation rule with dynamic action and decision mapping."""
 
         dpv_personal_data = []
         for category in legislation_rule.data_category:
@@ -194,27 +180,25 @@ class StandardsConverter:
             action_uri = self.dpv_concepts.get_action_uri(action.action_type, is_user_action=True)
             dpv_user_actions.append(action_uri)
 
-        # Dynamic decision-enabling actions mapping
-        dpv_decision_actions = []
-        
-        # From rule actions that enable decisions
-        for action in legislation_rule.actions:
-            if hasattr(action, 'enables_decision') and action.enables_decision:
-                decision_action_uri = self.dpv_concepts.get_decision_action_uri(action.action_type)
-                dpv_decision_actions.append(decision_action_uri)
-        
-        # From user actions that enable decisions
-        for action in legislation_rule.user_actions:
-            if hasattr(action, 'enables_decision') and action.enables_decision:
-                decision_action_uri = self.dpv_concepts.get_decision_action_uri(action.action_type)
-                dpv_decision_actions.append(decision_action_uri)
-        
-        # From decision outcome required actions
-        if legislation_rule.decision_outcome:
-            for required_action in legislation_rule.decision_outcome.required_actions:
-                required_action_value = required_action.value if hasattr(required_action, 'value') else str(required_action)
-                if required_action_value in self.dpv_concepts.REQUIRED_ACTIONS:
-                    dpv_decision_actions.append(self.dpv_concepts.REQUIRED_ACTIONS[required_action_value])
+        # Dynamic decision mapping
+        dpv_decisions = []
+        dpv_decision_outcomes = []
+        for decision in legislation_rule.decisions:
+            decision_type_value = decision.decision_type.value if hasattr(decision.decision_type, 'value') else str(decision.decision_type)
+            decision_context_value = decision.decision_context.value if hasattr(decision.decision_context, 'value') else str(decision.decision_context)
+            outcome_value = decision.outcome.value if hasattr(decision.outcome, 'value') else str(decision.outcome)
+            
+            # Map decision type
+            if decision_type_value in self.dpv_concepts.DECISION_TYPES:
+                dpv_decisions.append(self.dpv_concepts.DECISION_TYPES[decision_type_value])
+            
+            # Map decision outcome
+            if outcome_value in self.dpv_concepts.DECISION_OUTCOMES:
+                dpv_decision_outcomes.append(self.dpv_concepts.DECISION_OUTCOMES[outcome_value])
+            
+            # Create combined decision URI
+            combined_decision_uri = self.dpv_concepts.get_decision_uri(decision_type_value, decision_context_value, outcome_value)
+            dpv_decisions.append(combined_decision_uri)
 
         dpv_locations = [f"dpv:Country_{country.replace(' ', '_')}" for country in legislation_rule.applicable_countries]
 
@@ -227,11 +211,12 @@ class StandardsConverter:
             "hasLocation": dpv_locations,
             "hasRuleAction": dpv_rule_actions,
             "hasUserAction": dpv_user_actions,
-            "hasDecisionAction": dpv_decision_actions
+            "hasDecision": dpv_decisions,
+            "hasDecisionOutcome": dpv_decision_outcomes
         }
 
     def _extract_odrl_elements(self, legislation_rule: LegislationRule) -> Dict[str, Any]:
-        """Extract ODRL elements from legislation rule with decision context."""
+        """Extract ODRL elements from legislation rule with decision support."""
 
         permissions = []
         prohibitions = []
@@ -240,23 +225,29 @@ class StandardsConverter:
         rule_description = legislation_rule.description.lower()
         event_type = legislation_rule.event.type.lower()
 
-        # Consider decision outcome for ODRL classification
-        if legislation_rule.decision_outcome:
-            decision_type = legislation_rule.decision_outcome.decision
-            if decision_type == DecisionType.YES:
-                permission = self._create_odrl_rule(legislation_rule, "permission")
+        # Analyze decisions to determine ODRL policies
+        for decision in legislation_rule.decisions:
+            outcome_value = decision.outcome.value if hasattr(decision.outcome, 'value') else str(decision.outcome)
+            decision_type_value = decision.decision_type.value if hasattr(decision.decision_type, 'value') else str(decision.decision_type)
+            
+            if outcome_value == "yes":
+                permission = self._create_odrl_rule_from_decision(legislation_rule, decision, "permission")
                 permissions.append(permission)
-            elif decision_type == DecisionType.NO:
-                prohibition = self._create_odrl_rule(legislation_rule, "prohibition")
+            elif outcome_value == "no":
+                prohibition = self._create_odrl_rule_from_decision(legislation_rule, decision, "prohibition")
                 prohibitions.append(prohibition)
-            elif decision_type == DecisionType.MAYBE:
-                # Conditional permission with obligations
-                permission = self._create_odrl_rule(legislation_rule, "permission")
-                permissions.append(permission)
-                obligation = self._create_odrl_rule(legislation_rule, "obligation")
-                obligations.append(obligation)
-        else:
-            # Fallback to text analysis
+            elif outcome_value == "maybe":
+                # Maybe decisions become conditional permissions (permissions with constraints)
+                conditional_permission = self._create_odrl_rule_from_decision(legislation_rule, decision, "conditional_permission")
+                permissions.append(conditional_permission)
+                
+                # Also create obligations for the required actions
+                if decision.required_actions_for_maybe:
+                    obligation = self._create_odrl_rule_from_decision(legislation_rule, decision, "obligation")
+                    obligations.append(obligation)
+
+        # Fallback to traditional analysis if no decisions present
+        if not permissions and not prohibitions and not obligations:
             if "prohibit" in rule_description or "forbid" in event_type:
                 prohibition = self._create_odrl_rule(legislation_rule, "prohibition")
                 prohibitions.append(prohibition)
@@ -273,89 +264,106 @@ class StandardsConverter:
             "obligation": obligations
         }
 
-    def _extract_decision_elements(self, legislation_rule: LegislationRule) -> Dict[str, Any]:
-        """Extract decision-specific elements from legislation rule."""
-        
-        decision_elements = {
-            "primary_decision": None,
-            "decision_rules": [],
-            "decision_contexts": [],
-            "conditional_requirements": [],
-            "enabling_actions": []
+    def _create_odrl_rule_from_decision(self, legislation_rule: LegislationRule, decision, rule_type: str) -> Dict[str, Any]:
+        """Create ODRL rule from decision scenario."""
+
+        target = f"urn:asset:{legislation_rule.source_file}:{legislation_rule.id}:{decision.id}"
+
+        # Map decision type to ODRL action
+        decision_type_value = decision.decision_type.value if hasattr(decision.decision_type, 'value') else str(decision.decision_type)
+        action_mapping = {
+            "data_transfer": "transfer",
+            "data_processing": "use",
+            "data_collection": "collect",
+            "data_storage": "store",
+            "data_deletion": "delete",
+            "access_permission": "read",
+            "sharing_permission": "distribute"
         }
         
-        # Extract primary decision outcome
-        if legislation_rule.decision_outcome:
-            decision_elements["primary_decision"] = {
-                "decision_type": legislation_rule.decision_outcome.decision.value,
-                "context": legislation_rule.decision_outcome.context.value,
-                "confidence": legislation_rule.decision_outcome.confidence,
-                "reasoning": legislation_rule.decision_outcome.decision_reasoning,
-                "legislative_basis": legislation_rule.decision_outcome.legislative_basis,
-                "required_actions": [action.value for action in legislation_rule.decision_outcome.required_actions],
-                "required_conditions": legislation_rule.decision_outcome.required_conditions
-            }
-            
-            decision_elements["decision_contexts"].append(legislation_rule.decision_outcome.context.value)
-            decision_elements["conditional_requirements"].extend(
-                [action.value for action in legislation_rule.decision_outcome.required_actions]
-            )
+        action = action_mapping.get(decision_type_value, "use")
+
+        constraints = []
         
-        # Extract decision rules
-        for decision_rule in legislation_rule.decision_rules:
-            rule_element = {
-                "id": decision_rule.id,
-                "question": decision_rule.question,
-                "context": decision_rule.context.value,
-                "default_decision": decision_rule.default_decision.value,
-                "conditional_decisions": decision_rule.conditional_decisions,
-                "requirements_for_yes": decision_rule.requirements_for_yes,
-                "requirements_for_maybe": [req.value for req in decision_rule.requirements_for_maybe],
-                "reasons_for_no": decision_rule.reasons_for_no,
-                "applicable_scenarios": decision_rule.applicable_scenarios,
-                "confidence_score": decision_rule.confidence_score
-            }
-            
-            decision_elements["decision_rules"].append(rule_element)
-            decision_elements["decision_contexts"].append(decision_rule.context.value)
-            decision_elements["conditional_requirements"].extend(
-                [req.value for req in decision_rule.requirements_for_maybe]
-            )
+        # Add constraints based on decision outcome and conditions
+        outcome_value = decision.outcome.value if hasattr(decision.outcome, 'value') else str(decision.outcome)
         
-        # Extract enabling actions from rule actions
-        for action in legislation_rule.actions:
-            if hasattr(action, 'enables_decision') and action.enables_decision:
-                enabling_element = {
-                    "action_id": action.id,
-                    "action_type": action.action_type,
-                    "title": action.title,
-                    "enables_decision": action.enables_decision.decision.value,
-                    "decision_context": action.enables_decision.context.value,
-                    "decision_reasoning": action.enables_decision.decision_reasoning
+        if outcome_value == "maybe" or rule_type == "conditional_permission":
+            # Add constraints for maybe conditions
+            for condition in decision.conditions_for_maybe:
+                constraint = {
+                    "leftOperand": "required_condition",
+                    "operator": "eq",
+                    "rightOperand": condition,
+                    "comment": f"Required condition: {condition}"
                 }
-                decision_elements["enabling_actions"].append(enabling_element)
-        
-        # Extract enabling actions from user actions
-        for action in legislation_rule.user_actions:
-            if hasattr(action, 'enables_decision') and action.enables_decision:
-                enabling_element = {
-                    "action_id": action.id,
-                    "action_type": action.action_type,
-                    "title": action.title,
-                    "enables_decision": action.enables_decision.decision.value,
-                    "decision_context": action.enables_decision.context.value,
-                    "decision_reasoning": action.enables_decision.decision_reasoning
+                constraints.append(constraint)
+                
+            # Add constraints for required actions
+            for action_required in decision.required_actions_for_maybe:
+                constraint = {
+                    "leftOperand": "required_action",
+                    "operator": "eq", 
+                    "rightOperand": action_required,
+                    "comment": f"Required action: {action_required}"
                 }
-                decision_elements["enabling_actions"].append(enabling_element)
+                constraints.append(constraint)
         
-        # Remove duplicates from lists
-        decision_elements["decision_contexts"] = list(set(decision_elements["decision_contexts"]))
-        decision_elements["conditional_requirements"] = list(set(decision_elements["conditional_requirements"]))
+        elif outcome_value == "yes":
+            # Add constraints for yes conditions
+            for condition in decision.conditions_for_yes:
+                constraint = {
+                    "leftOperand": "fulfillment_condition",
+                    "operator": "eq",
+                    "rightOperand": condition,
+                    "comment": f"Fulfillment condition: {condition}"
+                }
+                constraints.append(constraint)
         
-        return decision_elements
+        elif outcome_value == "no":
+            # Add constraints for no conditions
+            for condition in decision.conditions_for_no:
+                constraint = {
+                    "leftOperand": "prohibition_condition",
+                    "operator": "eq",
+                    "rightOperand": condition,
+                    "comment": f"Prohibition condition: {condition}"
+                }
+                constraints.append(constraint)
+
+        # Add geographic constraints if cross-border
+        if decision.cross_border:
+            if decision.source_jurisdiction:
+                constraint = {
+                    "leftOperand": "source_jurisdiction",
+                    "operator": "eq",
+                    "rightOperand": decision.source_jurisdiction,
+                    "comment": f"Source jurisdiction: {decision.source_jurisdiction}"
+                }
+                constraints.append(constraint)
+            
+            if decision.target_jurisdiction:
+                constraint = {
+                    "leftOperand": "target_jurisdiction", 
+                    "operator": "eq",
+                    "rightOperand": decision.target_jurisdiction,
+                    "comment": f"Target jurisdiction: {decision.target_jurisdiction}"
+                }
+                constraints.append(constraint)
+
+        rule = {
+            "target": target,
+            "action": action,
+            "constraint": constraints,
+            "decision_scenario": decision.scenario,
+            "decision_rationale": decision.rationale,
+            "decision_outcome": outcome_value
+        }
+
+        return rule
 
     def _create_odrl_rule(self, legislation_rule: LegislationRule, rule_type: str) -> Dict[str, Any]:
-        """Create individual ODRL rule from legislation rule with decision context."""
+        """Create individual ODRL rule from legislation rule (fallback method)."""
 
         target = f"urn:asset:{legislation_rule.source_file}:{legislation_rule.id}"
 
@@ -379,8 +387,6 @@ class StandardsConverter:
             actions = ["use"]
 
         constraints = []
-        
-        # Add standard conditions as constraints
         for logic_type, conditions in legislation_rule.conditions.items():
             for condition in conditions:
                 operator_value = condition.operator.value if hasattr(condition.operator, 'value') else str(condition.operator)
@@ -391,29 +397,12 @@ class StandardsConverter:
                     "comment": condition.description
                 }
                 constraints.append(constraint)
-        
-        # Add decision-specific constraints
-        if legislation_rule.decision_outcome and legislation_rule.decision_outcome.required_actions:
-            for required_action in legislation_rule.decision_outcome.required_actions:
-                action_value = required_action.value if hasattr(required_action, 'value') else str(required_action)
-                constraint = {
-                    "leftOperand": "required_action",
-                    "operator": "eq",
-                    "rightOperand": action_value,
-                    "comment": f"Required action for conditional decision: {action_value.replace('_', ' ')}"
-                }
-                constraints.append(constraint)
 
         rule = {
             "target": target,
             "action": actions[0] if len(actions) == 1 else actions,
             "constraint": constraints
         }
-        
-        # Add decision context if available
-        if legislation_rule.decision_outcome:
-            rule["decisionContext"] = legislation_rule.decision_outcome.context.value
-            rule["decisionType"] = legislation_rule.decision_outcome.decision.value
 
         return rule
 
@@ -433,11 +422,8 @@ class StandardsConverter:
         }
         return mapping.get(operator, "eq")
 
-    def _create_integrated_rule(
-        self, legislation_rule: LegislationRule, dpv_elements: Dict[str, Any], 
-        odrl_elements: Dict[str, Any], decision_elements: Dict[str, Any]
-    ) -> IntegratedRule:
-        """Create integrated rule with decision-making capabilities."""
+    def _create_integrated_rule(self, legislation_rule: LegislationRule, dpv_elements: Dict[str, Any], odrl_elements: Dict[str, Any]) -> IntegratedRule:
+        """Create integrated rule with decision support."""
 
         source_levels = []
         chunk_refs = []
@@ -449,30 +435,8 @@ class StandardsConverter:
                 if condition.chunk_reference and condition.chunk_reference not in chunk_refs:
                     chunk_refs.append(condition.chunk_reference)
 
-        # Create primary decision outcome for integrated rule
-        primary_decision = None
-        if decision_elements["primary_decision"]:
-            pd = decision_elements["primary_decision"]
-            # Map required actions to URIs
-            required_action_uris = []
-            for action in pd["required_actions"]:
-                if action in self.dpv_concepts.REQUIRED_ACTIONS:
-                    required_action_uris.append(self.dpv_concepts.REQUIRED_ACTIONS[action])
-            
-            primary_decision = DecisionOutcome(
-                decision=DecisionType(pd["decision_type"]),
-                context=DecisionContext(pd["context"]),
-                confidence=pd["confidence"],
-                required_actions=[RequiredActionType(action) for action in pd["required_actions"]],
-                required_conditions=pd["required_conditions"],
-                decision_reasoning=pd["reasoning"],
-                legislative_basis=pd["legislative_basis"]
-            )
-
         return IntegratedRule(
             id=f"integrated:{legislation_rule.id}",
-            primary_decision=primary_decision,
-            decision_rules=legislation_rule.decision_rules,
             dpv_hasProcessing=dpv_elements.get("hasProcessing", []),
             dpv_hasPurpose=dpv_elements.get("hasPurpose", []),
             dpv_hasPersonalData=dpv_elements.get("hasPersonalData", []),
@@ -481,12 +445,11 @@ class StandardsConverter:
             dpv_hasLocation=dpv_elements.get("hasLocation", []),
             dpv_hasRuleAction=dpv_elements.get("hasRuleAction", []),
             dpv_hasUserAction=dpv_elements.get("hasUserAction", []),
-            dpv_hasDecisionAction=dpv_elements.get("hasDecisionAction", []),
+            dpv_hasDecision=dpv_elements.get("hasDecision", []),
+            dpv_hasDecisionOutcome=dpv_elements.get("hasDecisionOutcome", []),
             odrl_permission=odrl_elements.get("permission", []),
             odrl_prohibition=odrl_elements.get("prohibition", []),
             odrl_obligation=odrl_elements.get("obligation", []),
-            odre_enforcement_mode="decision_based",
-            odre_decision_inference=True,
             source_document_levels=source_levels,
             chunk_references=chunk_refs,
             source_legislation=legislation_rule.source_file,
@@ -495,45 +458,20 @@ class StandardsConverter:
         )
 
     def integrated_to_json_rules(self, integrated_rule: IntegratedRule) -> Dict[str, Any]:
-        """Convert integrated rule back to JSON rules format (if needed) with decision information."""
-        
-        decision_info = {}
-        if integrated_rule.primary_decision:
-            decision_info = {
-                "primary_decision": {
-                    "decision": integrated_rule.primary_decision.decision.value,
-                    "context": integrated_rule.primary_decision.context.value,
-                    "confidence": integrated_rule.primary_decision.confidence,
-                    "required_actions": [action.value for action in integrated_rule.primary_decision.required_actions],
-                    "reasoning": integrated_rule.primary_decision.decision_reasoning
-                }
-            }
-        
-        decision_rules_info = []
-        for rule in integrated_rule.decision_rules:
-            decision_rules_info.append({
-                "id": rule.id,
-                "question": rule.question,
-                "context": rule.context.value,
-                "default_decision": rule.default_decision.value,
-                "requirements_for_maybe": [req.value for req in rule.requirements_for_maybe]
-            })
-        
+        """Convert integrated rule back to JSON rules format (if needed) with decision support."""
+        # Implementation for reverse conversion with decisions
         return {
             "id": integrated_rule.id.replace("integrated:", ""),
             "source_legislation": integrated_rule.source_legislation,
             "source_article": integrated_rule.source_article,
-            "decision_capabilities": {
-                **decision_info,
-                "decision_rules": decision_rules_info
-            },
             "dpv_elements": {
                 "processing": integrated_rule.dpv_hasProcessing,
                 "purpose": integrated_rule.dpv_hasPurpose,
                 "personal_data": integrated_rule.dpv_hasPersonalData,
                 "rule_actions": integrated_rule.dpv_hasRuleAction,
                 "user_actions": integrated_rule.dpv_hasUserAction,
-                "decision_actions": integrated_rule.dpv_hasDecisionAction
+                "decisions": integrated_rule.dpv_hasDecision,
+                "decision_outcomes": integrated_rule.dpv_hasDecisionOutcome
             },
             "odrl_elements": {
                 "permissions": integrated_rule.odrl_permission,

@@ -1,5 +1,6 @@
 """
-LangChain tools for rule extraction and action inference.
+LangChain tools for rule extraction, action inference, and decision-making.
+Enhanced with decision inference capabilities.
 """
 
 from .langchain_tools import (
@@ -11,7 +12,9 @@ from .langchain_tools import (
     infer_data_subject_rights_actions,
     infer_user_actionable_tasks,
     infer_user_compliance_tasks,
-    infer_user_rights_support_tasks
+    infer_user_rights_support_tasks,
+    infer_decision_scenarios,
+    infer_conditional_permissions
 )
 
 __all__ = [
@@ -23,5 +26,8 @@ __all__ = [
     "infer_data_subject_rights_actions",
     "infer_user_actionable_tasks",
     "infer_user_compliance_tasks",
-    "infer_user_rights_support_tasks"
+    "infer_user_rights_support_tasks",
+    # Decision inference tools
+    "infer_decision_scenarios",
+    "infer_conditional_permissions"
 ]

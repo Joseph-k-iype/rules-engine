@@ -1,5 +1,6 @@
 """
-Main execution script for the legislation rules converter with decision-making capabilities.
+Main execution script for the legislation rules converter.
+Enhanced with decision-making capabilities and display.
 """
 import asyncio
 import logging
@@ -15,13 +16,13 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    """Main execution function with enhanced processing and decision-making display."""
+    """Main execution function with enhanced processing, decision-making, and improved output display."""
 
     analyzer = LegislationAnalyzer()
 
     try:
         print("\n=== ADVANCED LEGISLATION RULES CONVERTER WITH DECISION-MAKING CAPABILITIES ===")
-        print("Processing legislation with dynamic chunking, triple action inference (rule + user + decision-enabling), comprehensive document analysis, decision inference, and anti-hallucination measures...\n")
+        print("Processing legislation with dynamic chunking, dual action inference (rule + user), decision inference (yes/no/maybe), comprehensive document analysis, and anti-hallucination measures...\n")
 
         # Show metadata configuration
         print("📋 METADATA CONFIGURATION:")
@@ -45,8 +46,8 @@ async def main():
             print("Please create config/legislation_metadata.json with your configuration")
             return
 
-        print(f"📄 Config file: {Config.METADATA_CONFIG_FILE}")
-        print(f"🔧 Chunk size: {Config.CHUNK_SIZE} chars, Overlap: {Config.OVERLAP_SIZE} chars")
+        print(f"🔧 Config file: {Config.METADATA_CONFIG_FILE}")
+        print(f"📝 Chunk size: {Config.CHUNK_SIZE} chars, Overlap: {Config.OVERLAP_SIZE} chars")
         print(f"📏 Chunking threshold: {Config.MAX_FILE_SIZE / (1024*1024):.1f} MB")
         print()
 
@@ -62,8 +63,9 @@ async def main():
             return
 
         # Process configured entries
-        print("📊 Processing configured legislation entries...")
+        print("🔍 Processing configured legislation entries...")
         print("ℹ️ Note: Processing will run regardless of existing rules (no skipping)")
+        print("🎯 Enhanced Features: Decision inference for yes/no/maybe outcomes")
         os.makedirs(Config.LEGISLATION_PDF_PATH, exist_ok=True)
 
         result = await analyzer.process_legislation_folder()
@@ -74,9 +76,7 @@ async def main():
         print(f"📈 Total Rules: {result.total_rules}")
         print(f"🎯 Total Rule Actions: {result.total_actions}")
         print(f"👤 Total User Actions: {result.total_user_actions}")
-        print(f"🎲 Total Decision Rules: {result.total_decision_rules}")
-        print(f"⚖️ Total Decision-Enabled Rules: {result.total_decisions}")
-        print(f"🔍 Decision Contexts Found: {', '.join(result.decision_contexts) if result.decision_contexts else 'None'}")
+        print(f"🔄 Total Decisions: {result.total_decisions}")
         print(f"⏱️ Processing Time: {result.processing_time:.2f} seconds")
         print(f"🔗 Integrated Rules: {len(result.integrated_rules)}")
         print(f"📚 Documents Processed: {result.documents_processed}")
@@ -86,44 +86,10 @@ async def main():
             for doc_id, chunk_info in result.chunking_metadata.items():
                 print(f"   {doc_id}: {chunk_info['chunks']} chunks")
 
-        # Display decision-making statistics
-        if result.total_decisions > 0:
-            print(f"\n=== DECISION-MAKING STATISTICS ===")
-            decision_stats = result.get_decision_statistics()
-            print(f"🎯 Rules with Decision Capabilities: {decision_stats['total_decision_enabled_rules']}")
-            
-            if decision_stats["decision_type_breakdown"]:
-                print(f"📊 Decision Type Breakdown:")
-                for decision_type, count in decision_stats["decision_type_breakdown"].items():
-                    if count > 0:
-                        emoji = "✅" if decision_type == "yes" else "❌" if decision_type == "no" else "❓" if decision_type == "maybe" else "❔"
-                        print(f"   {emoji} {decision_type.upper()}: {count} rules")
-            
-            if decision_stats["decision_context_breakdown"]:
-                print(f"🎪 Decision Context Breakdown:")
-                for context, count in decision_stats["decision_context_breakdown"].items():
-                    context_emoji = {
-                        "data_transfer": "📤", "data_processing": "⚙️", "data_storage": "💾",
-                        "data_collection": "📥", "data_sharing": "🤝", "data_deletion": "🗑️",
-                        "consent_management": "✋", "rights_exercise": "👥", "compliance_verification": "✔️"
-                    }.get(context, "📋")
-                    print(f"   {context_emoji} {context.replace('_', ' ').title()}: {count} rules")
-            
-            if decision_stats["conditional_actions_required"]:
-                print(f"🔧 Most Required Actions for Conditional Decisions:")
-                sorted_actions = sorted(decision_stats["conditional_actions_required"].items(), key=lambda x: x[1], reverse=True)
-                for action, count in sorted_actions[:5]:  # Top 5
-                    action_emoji = {
-                        "data_masking": "🎭", "data_encryption": "🔐", "consent_obtainment": "✋",
-                        "safeguards_implementation": "🛡️", "documentation_completion": "📝",
-                        "adequacy_verification": "✅", "impact_assessment": "📋"
-                    }.get(action, "⚙️")
-                    print(f"   {action_emoji} {action.replace('_', ' ').title()}: {count} times")
-
         if result.rules:
-            print(f"\n=== EXTRACTED RULES WITH DECISION-MAKING CAPABILITIES ===")
+            print(f"\n=== EXTRACTED RULES WITH DUAL ACTIONS AND DECISION SUPPORT ===")
             for i, rule in enumerate(result.rules, 1):
-                print(f"\n🔸 Rule {i}: {rule.name}")
+                print(f"\n🔍 Rule {i}: {rule.name}")
                 print(f"   📝 Description: {rule.description}")
                 print(f"   📄 Source: {rule.source_article}")
 
@@ -151,31 +117,6 @@ async def main():
                     if rule.processing_metadata.get("chunk_reference"):
                         print(f"   🧩 Chunk: {rule.processing_metadata['chunk_reference']}")
 
-                # Display decision capabilities
-                decision_summary = rule.get_decision_summary()
-                if decision_summary["has_decision_capability"]:
-                    print(f"   🎲 Decision Capability: YES")
-                    
-                    if decision_summary["primary_decision"]:
-                        pd = decision_summary["primary_decision"]
-                        decision_emoji = "✅" if pd["decision"] == "yes" else "❌" if pd["decision"] == "no" else "❓" if pd["decision"] == "maybe" else "❔"
-                        print(f"   {decision_emoji} Primary Decision: {pd['decision'].upper()} for {pd['context'].replace('_', ' ')}")
-                        print(f"      📊 Confidence: {pd['confidence']:.2f}")
-                        if pd["required_actions"]:
-                            print(f"      🔧 Required Actions: {', '.join(pd['required_actions'])}")
-                    
-                    if decision_summary["decision_contexts"]:
-                        contexts = ', '.join(decision_summary["decision_contexts"])
-                        print(f"   🎪 Decision Contexts: {contexts.replace('_', ' ')}")
-                    
-                    if decision_summary["enabling_actions"]:
-                        print(f"   ⚙️ Actions that Enable Decisions:")
-                        for action in decision_summary["enabling_actions"]:
-                            action_emoji = "✅" if action["enables"] == "yes" else "❌" if action["enables"] == "no" else "❓"
-                            print(f"      {action_emoji} {action['action_type']} → {action['enables']} for {action['context'].replace('_', ' ')}")
-                else:
-                    print(f"   🎲 Decision Capability: NO")
-
                 print(f"   📋 Conditions:")
                 for logic_type, conditions in rule.conditions.items():
                     print(f"      {logic_type.upper()}:")
@@ -198,15 +139,6 @@ async def main():
                         print(f"          Level: {level_display}")
                         if condition.chunk_reference:
                             print(f"          Chunk: {condition.chunk_reference}")
-                        
-                        # Show decision impact of condition
-                        if hasattr(condition, 'decision_impact') and condition.decision_impact:
-                            decision_impact = condition.decision_impact.value if hasattr(condition.decision_impact, 'value') else str(condition.decision_impact)
-                            print(f"          Decision Impact: {decision_impact}")
-                        
-                        if hasattr(condition, 'conditional_requirement') and condition.conditional_requirement:
-                            req = condition.conditional_requirement.value if hasattr(condition.conditional_requirement, 'value') else str(condition.conditional_requirement)
-                            print(f"          Conditional Requirement: {req.replace('_', ' ')}")
 
                 # Show RULE ACTIONS (Organizational)
                 if rule.actions:
@@ -225,15 +157,6 @@ async def main():
                         print(f"         Verification: {', '.join(action.verification_method)}")
                         print(f"         Derived From: {action.derived_from_text[:100]}...")
                         print(f"         Confidence: {action.confidence_score}")
-                        
-                        # Show decision capabilities of action
-                        if hasattr(action, 'enables_decision') and action.enables_decision:
-                            decision_emoji = "✅" if action.enables_decision.decision.value == "yes" else "❓"
-                            print(f"         🎯 Enables Decision: {decision_emoji} {action.enables_decision.decision.value} for {action.enables_decision.context.value.replace('_', ' ')}")
-                        
-                        if hasattr(action, 'required_for_decision') and action.required_for_decision:
-                            print(f"         🔧 Required For: {action.required_for_decision.value} decisions")
-                        
                         print()
                 else:
                     print(f"   🏢 RULE ACTIONS - Organizational: None inferred")
@@ -257,52 +180,56 @@ async def main():
                         print(f"         User Verification: {', '.join(action.user_verification_steps)}")
                         print(f"         Derived From: {action.derived_from_text[:100]}...")
                         print(f"         Confidence: {action.confidence_score}")
-                        
-                        # Show decision capabilities of user action
-                        if hasattr(action, 'enables_decision') and action.enables_decision:
-                            decision_emoji = "✅" if action.enables_decision.decision.value == "yes" else "❓"
-                            print(f"         🎯 Enables Decision: {decision_emoji} {action.enables_decision.decision.value} for {action.enables_decision.context.value.replace('_', ' ')}")
-                        
-                        if hasattr(action, 'decision_impact') and action.decision_impact:
-                            print(f"         📊 Decision Impact: {action.decision_impact}")
-                        
                         print()
                 else:
                     print(f"   👤 USER ACTIONS - Individual: None inferred")
 
-                # Show DECISION RULES (Decision Framework)
-                if rule.decision_rules:
-                    print(f"   🎲 DECISION RULES - Decision Framework ({len(rule.decision_rules)}):")
-                    for decision_rule in rule.decision_rules:
-                        context_emoji = {
-                            "data_transfer": "📤", "data_processing": "⚙️", "data_storage": "💾",
-                            "data_collection": "📥", "data_sharing": "🤝", "data_deletion": "🗑️",
-                            "consent_management": "✋", "rights_exercise": "👥", "compliance_verification": "✔️"
-                        }.get(decision_rule.context.value, "📋")
+                # Show DECISIONS (New decision-making capabilities)
+                if rule.decisions:
+                    print(f"   🔄 DECISIONS - Yes/No/Maybe ({len(rule.decisions)}):")
+                    for decision in rule.decisions:
+                        decision_type_display = decision.decision_type.value if hasattr(decision.decision_type, 'value') else str(decision.decision_type)
+                        decision_context_display = decision.decision_context.value if hasattr(decision.decision_context, 'value') else str(decision.decision_context)
+                        outcome_display = decision.outcome.value if hasattr(decision.outcome, 'value') else str(decision.outcome)
                         
-                        print(f"      {context_emoji} Question: {decision_rule.question}")
-                        print(f"         Context: {decision_rule.context.value.replace('_', ' ').title()}")
+                        print(f"      🎯 {decision.scenario}")
+                        print(f"         Type: {decision_type_display}")
+                        print(f"         Context: {decision_context_display}")
+                        print(f"         Outcome: {outcome_display.upper()}")
+                        print(f"         Rationale: {decision.rationale}")
                         
-                        default_emoji = "✅" if decision_rule.default_decision.value == "yes" else "❌" if decision_rule.default_decision.value == "no" else "❓"
-                        print(f"         {default_emoji} Default Decision: {decision_rule.default_decision.value.upper()}")
+                        if decision.conditions_for_yes:
+                            print(f"         ✅ Conditions for YES: {'; '.join(decision.conditions_for_yes)}")
+                        if decision.conditions_for_no:
+                            print(f"         ❌ Conditions for NO: {'; '.join(decision.conditions_for_no)}")
+                        if decision.conditions_for_maybe:
+                            print(f"         ❓ Conditions for MAYBE: {'; '.join(decision.conditions_for_maybe)}")
                         
-                        if decision_rule.requirements_for_yes:
-                            print(f"         ✅ Requirements for YES: {', '.join(decision_rule.requirements_for_yes)}")
+                        if decision.required_actions_for_yes:
+                            print(f"         ✅ Required Actions for YES: {'; '.join(decision.required_actions_for_yes)}")
+                        if decision.required_actions_for_maybe:
+                            print(f"         ❓ Required Actions for MAYBE→YES: {'; '.join(decision.required_actions_for_maybe)}")
                         
-                        if decision_rule.requirements_for_maybe:
-                            maybe_reqs = [req.value.replace('_', ' ') for req in decision_rule.requirements_for_maybe]
-                            print(f"         ❓ Requirements for MAYBE: {', '.join(maybe_reqs)}")
+                        if decision.decision_factors:
+                            print(f"         📊 Decision Factors: {'; '.join(decision.decision_factors)}")
                         
-                        if decision_rule.reasons_for_no:
-                            print(f"         ❌ Reasons for NO: {', '.join(decision_rule.reasons_for_no)}")
+                        if decision.applicable_data_categories:
+                            print(f"         📊 Applicable Data: {'; '.join(decision.applicable_data_categories)}")
+                        if decision.applicable_roles:
+                            print(f"         👥 Applicable Roles: {'; '.join(decision.applicable_roles)}")
                         
-                        if decision_rule.applicable_scenarios:
-                            print(f"         🎪 Scenarios: {', '.join(decision_rule.applicable_scenarios)}")
+                        if decision.cross_border:
+                            print(f"         🌍 Cross-Border: Yes")
+                            if decision.source_jurisdiction:
+                                print(f"         📍 Source: {decision.source_jurisdiction}")
+                            if decision.target_jurisdiction:
+                                print(f"         📍 Target: {decision.target_jurisdiction}")
                         
-                        print(f"         📊 Confidence: {decision_rule.confidence_score:.2f}")
+                        print(f"         Confidence: {decision.confidence_score}")
+                        print(f"         Derived From: {decision.derived_from_text[:100]}...")
                         print()
                 else:
-                    print(f"   🎲 DECISION RULES - Decision Framework: None inferred")
+                    print(f"   🔄 DECISIONS - Yes/No/Maybe: None inferred")
 
                 # Show integrated alignment
                 if i <= len(result.integrated_rules):
@@ -313,7 +240,8 @@ async def main():
                     print(f"      DPV Data Types: {[d.split('#')[-1] for d in integrated_rule.dpv_hasPersonalData] if integrated_rule.dpv_hasPersonalData else 'none'}")
                     print(f"      DPV Rule Actions: {[a.split('#')[-1] for a in integrated_rule.dpv_hasRuleAction] if integrated_rule.dpv_hasRuleAction else 'none'}")
                     print(f"      DPV User Actions: {[a.split('#')[-1] for a in integrated_rule.dpv_hasUserAction] if integrated_rule.dpv_hasUserAction else 'none'}")
-                    print(f"      DPV Decision Actions: {[a.split('#')[-1] for a in integrated_rule.dpv_hasDecisionAction] if integrated_rule.dpv_hasDecisionAction else 'none'}")
+                    print(f"      DPV Decisions: {[d.split('#')[-1] for d in integrated_rule.dpv_hasDecision] if integrated_rule.dpv_hasDecision else 'none'}")
+                    print(f"      DPV Decision Outcomes: {[o.split('#')[-1] for o in integrated_rule.dpv_hasDecisionOutcome] if integrated_rule.dpv_hasDecisionOutcome else 'none'}")
                     print(f"      ODRE Triple Action Inference: Rule={integrated_rule.odre_action_inference}, User={integrated_rule.odre_user_action_inference}, Decision={integrated_rule.odre_decision_inference}")
                     if integrated_rule.chunk_references:
                         print(f"      Chunk References: {integrated_rule.chunk_references}")
@@ -331,22 +259,17 @@ async def main():
             # Generate timestamp for unique filenames
             timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
-            print("Enhanced formats with decision-making capabilities:")
+            print("Enhanced formats with dual actions and decisions:")
 
-            # Save JSON format with decision capabilities
-            json_file = os.path.join(Config.RULES_OUTPUT_PATH, f"rules_with_decisions_{timestamp}.json")
+            # Save JSON format with dual actions and decisions
+            json_file = os.path.join(Config.RULES_OUTPUT_PATH, f"rules_with_dual_actions_and_decisions_{timestamp}.json")
             result.save_json(json_file)
-            print(f"   JSON Rules with Decision Capabilities: {json_file}")
+            print(f"   JSON Rules with Dual Actions and Decisions: {json_file}")
 
-            # Save decision summary
-            decision_summary_file = os.path.join(Config.RULES_OUTPUT_PATH, f"decision_summary_{timestamp}.json")
-            result.save_decision_summary(decision_summary_file)
-            print(f"   Decision Summary: {decision_summary_file}")
-
-            # Save comprehensive CSV format
-            csv_file = os.path.join(Config.RULES_OUTPUT_PATH, f"rules_with_decisions_{timestamp}.csv")
+            # Save single comprehensive CSV format
+            csv_file = os.path.join(Config.RULES_OUTPUT_PATH, f"rules_with_dual_actions_and_decisions_{timestamp}.csv")
             result.save_csv(csv_file)
-            print(f"   CSV Rules with Decision Capabilities: {csv_file}")
+            print(f"   CSV Rules with Dual Actions and Decisions: {csv_file}")
 
             print("\nIntegrated Standards Formats:")
 
@@ -354,31 +277,32 @@ async def main():
             if result.integrated_rules:
                 integrated_ttl_file = os.path.join(Config.STANDARDS_OUTPUT_PATH, f"integrated_standards_with_decisions_{timestamp}.ttl")
                 result.save_integrated_ttl(integrated_ttl_file)
-                print(f"   Integrated TTL with Decision Framework: {integrated_ttl_file}")
+                print(f"   Integrated TTL with Decisions: {integrated_ttl_file}")
 
                 integrated_jsonld_file = os.path.join(Config.STANDARDS_OUTPUT_PATH, f"integrated_standards_with_decisions_{timestamp}.jsonld")
                 result.save_integrated_jsonld(integrated_jsonld_file)
-                print(f"   Integrated JSON-LD with Decision Framework: {integrated_jsonld_file}")
+                print(f"   Integrated JSON-LD with Decisions: {integrated_jsonld_file}")
 
                 integrated_json_file = os.path.join(Config.STANDARDS_OUTPUT_PATH, f"integrated_rules_with_decisions_{timestamp}.json")
                 result.save_integrated_json(integrated_json_file)
-                print(f"   Integrated JSON with Decision Framework: {integrated_json_file}")
+                print(f"   Integrated JSON with Decisions: {integrated_json_file}")
 
-            print(f"\nStandards Integration Summary with Decision-Making:")
-            print(f"   DPV v2.1: Processing activities with dynamic action mappings and decision contexts")
-            print(f"   ODRL: Policy expressions with data-specific constraints and decision conditions") 
-            print(f"   ODRE: Enforcement framework with triple action inference and decision-based enforcement")
-            print(f"   Decision Framework: YES/NO/MAYBE decision inference with conditional requirements")
+            print(f"\nStandards Integration Summary:")
+            print(f"   DPV v2.1: Processing activities with dynamic action mappings and decision support")
+            print(f"   ODRL: Policy expressions with data-specific constraints and decision-based permissions") 
+            print(f"   ODRE: Enforcement framework with triple inference capability (action + user + decision)")
+            print(f"   Decision Support: Yes/No/Maybe outcomes with conditional logic")
             print(f"   Multi-Level Processing: Legislation + guidance docs integration")
             print(f"   Dynamic Chunking: Large document processing support")
             print(f"   Comprehensive Analysis: Whole document understanding")
             print(f"   Anti-Hallucination: Focused analysis with verification")
 
-            # Show triple action statistics with decision information
-            if result.total_actions > 0 or result.total_user_actions > 0 or result.total_decision_rules > 0:
+            # Show comprehensive statistics including decisions
+            if result.total_actions > 0 or result.total_user_actions > 0 or result.total_decisions > 0:
                 rule_action_types = {}
                 user_action_types = {}
-                decision_contexts = {}
+                decision_types = {}
+                decision_outcomes = {}
                 priorities = {}
 
                 for rule in result.rules:
@@ -391,33 +315,35 @@ async def main():
                     for action in rule.user_actions:
                         user_action_types[action.action_type] = user_action_types.get(action.action_type, 0) + 1
                         priorities[action.priority] = priorities.get(action.priority, 0) + 1
-                    
-                    # Decision context statistics
-                    if rule.decision_outcome:
-                        context = rule.decision_outcome.context.value
-                        decision_contexts[context] = decision_contexts.get(context, 0) + 1
-                    
-                    for decision_rule in rule.decision_rules:
-                        context = decision_rule.context.value
-                        decision_contexts[context] = decision_contexts.get(context, 0) + 1
 
-                print(f"\n🎯 TRIPLE ACTION INFERENCE WITH DECISION-MAKING STATISTICS:")
+                    # Decision statistics
+                    for decision in rule.decisions:
+                        decision_type_val = decision.decision_type.value if hasattr(decision.decision_type, 'value') else str(decision.decision_type)
+                        outcome_val = decision.outcome.value if hasattr(decision.outcome, 'value') else str(decision.outcome)
+                        
+                        decision_types[decision_type_val] = decision_types.get(decision_type_val, 0) + 1
+                        decision_outcomes[outcome_val] = decision_outcomes.get(outcome_val, 0) + 1
+
+                print(f"\n🎯 COMPREHENSIVE TRIPLE INFERENCE STATISTICS:")
                 print(f"   Total Rule Actions (Organizational): {result.total_actions}")
                 print(f"   Total User Actions (Individual): {result.total_user_actions}")
-                print(f"   Total Decision Rules (Decision Framework): {result.total_decision_rules}")
+                print(f"   Total Decisions (Yes/No/Maybe): {result.total_decisions}")
                 print(f"   Unique Rule Action Types: {len(rule_action_types)}")
                 print(f"   Unique User Action Types: {len(user_action_types)}")
-                print(f"   Unique Decision Contexts: {len(decision_contexts)}")
+                print(f"   Unique Decision Types: {len(decision_types)}")
                 
                 if rule_action_types:
                     print(f"   Most Common Rule Types: {dict(sorted(rule_action_types.items(), key=lambda x: x[1], reverse=True)[:3])}")
                 if user_action_types:
                     print(f"   Most Common User Types: {dict(sorted(user_action_types.items(), key=lambda x: x[1], reverse=True)[:3])}")
-                if decision_contexts:
-                    print(f"   Most Common Decision Contexts: {dict(sorted(decision_contexts.items(), key=lambda x: x[1], reverse=True)[:3])}")
+                if decision_types:
+                    print(f"   Most Common Decision Types: {dict(sorted(decision_types.items(), key=lambda x: x[1], reverse=True)[:3])}")
+                if decision_outcomes:
+                    print(f"   Decision Outcome Distribution: {dict(decision_outcomes)}")
+                
                 print(f"   Priority Distribution: {dict(priorities)}")
 
-                # Calculate average confidence for all action types
+                # Calculate average confidence for all types
                 if result.total_actions > 0:
                     total_rule_confidence = sum(action.confidence_score for rule in result.rules for action in rule.actions)
                     avg_rule_confidence = total_rule_confidence / result.total_actions
@@ -427,63 +353,40 @@ async def main():
                     total_user_confidence = sum(action.confidence_score for rule in result.rules for action in rule.user_actions)
                     avg_user_confidence = total_user_confidence / result.total_user_actions
                     print(f"   Average User Action Confidence: {avg_user_confidence:.2f}")
-                
-                if result.total_decision_rules > 0:
-                    total_decision_confidence = sum(dr.confidence_score for rule in result.rules for dr in rule.decision_rules)
-                    avg_decision_confidence = total_decision_confidence / result.total_decision_rules
-                    print(f"   Average Decision Rule Confidence: {avg_decision_confidence:.2f}")
+
+                if result.total_decisions > 0:
+                    total_decision_confidence = sum(decision.confidence_score for rule in result.rules for decision in rule.decisions)
+                    avg_decision_confidence = total_decision_confidence / result.total_decisions
+                    print(f"   Average Decision Confidence: {avg_decision_confidence:.2f}")
 
             # Show database status
             total_existing = len(analyzer.rule_manager.existing_rules)
             existing_rule_actions = sum(len(rule.actions) for rule in analyzer.rule_manager.existing_rules)
             existing_user_actions = sum(len(rule.user_actions) for rule in analyzer.rule_manager.existing_rules)
-            existing_decision_rules = sum(len(getattr(rule, 'decision_rules', [])) for rule in analyzer.rule_manager.existing_rules)
+            existing_decisions = sum(len(rule.decisions) for rule in analyzer.rule_manager.existing_rules)
             
             print(f"\n=== RULE DATABASE STATUS ===")
             print(f"Total rules in database: {total_existing}")
             print(f"Total rule actions in database: {existing_rule_actions}")
             print(f"Total user actions in database: {existing_user_actions}")
-            print(f"Total decision rules in database: {existing_decision_rules}")
+            print(f"Total decisions in database: {existing_decisions}")
             print(f"New rules added: {len(result.rules)}")
             print(f"New rule actions added: {result.total_actions}")
             print(f"New user actions added: {result.total_user_actions}")
-            print(f"New decision rules added: {result.total_decision_rules}")
+            print(f"New decisions added: {result.total_decisions}")
             print(f"Database file: {Config.EXISTING_RULES_FILE}")
 
         else:
             print("\nNo rules were extracted.")
 
-        print(f"\nAdvanced processing with comprehensive document analysis, triple action inference, and decision-making capabilities complete!")
-        
-        # Show practical usage example
-        if result.total_decisions > 0:
-            print(f"\n=== PRACTICAL DECISION-MAKING USAGE ===")
-            print("📋 Example Questions Your Rules Can Now Answer:")
-            
-            # Find a few example rules with decision capabilities
-            decision_rules = [rule for rule in result.rules if rule.decision_outcome or rule.decision_rules]
-            
-            for i, rule in enumerate(decision_rules[:3], 1):  # Show first 3 examples
-                print(f"\n{i}. Based on {rule.source_article}:")
-                
-                if rule.decision_rules:
-                    for decision_rule in rule.decision_rules[:1]:  # Show first decision rule
-                        print(f"   ❓ Question: \"{decision_rule.question}\"")
-                        
-                        default_answer = decision_rule.default_decision.value.upper()
-                        default_emoji = "✅" if default_answer == "YES" else "❌" if default_answer == "NO" else "❓"
-                        print(f"   {default_emoji} Default Answer: {default_answer}")
-                        
-                        if decision_rule.requirements_for_maybe:
-                            requirements = [req.value.replace('_', ' ') for req in decision_rule.requirements_for_maybe]
-                            print(f"   🔧 Becomes YES if: {', '.join(requirements)} are completed")
-                        
-                        example_scenario = f"transferring {', '.join([cat.value.replace('_', ' ') for cat in rule.data_category])} from {rule.applicable_countries[0] if rule.applicable_countries else 'Country A'}"
-                        print(f"   💡 Example: {example_scenario}")
-                        break
-            
-            print(f"\n🎯 Your extracted rules can now provide YES/NO/MAYBE answers with specific action requirements!")
-            print(f"🔍 Use the decision summary JSON file to query specific scenarios programmatically.")
+        print(f"\nAdvanced processing with comprehensive document analysis, dual action inference, and decision-making complete!")
+        print(f"🎯 Key Features Delivered:")
+        print(f"   ✅ Dual Action Inference: Organizational rules + Individual user actions")
+        print(f"   ✅ Decision Support: Yes/No/Maybe outcomes with conditional logic")
+        print(f"   ✅ Cross-Border Decision Making: Transfer scenarios with adequacy assessment")
+        print(f"   ✅ Conditional Permissions: Maybe outcomes with required actions")
+        print(f"   ✅ Standards Integration: DPV v2.1 + ODRL + ODRE with decision ontology")
+        print(f"   ✅ Anti-Hallucination: Verification pipeline with source traceability")
 
     except Exception as e:
         logger.error(f"Error in main execution: {e}")
@@ -491,5 +394,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    # Run the enhanced main function
+    # Run the enhanced main function with decision-making capabilities
     asyncio.run(main())

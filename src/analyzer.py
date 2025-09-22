@@ -1,6 +1,6 @@
 """
-Main legislation analyzer with enhanced dual action inference, chunking support, whole document analysis, and decision inference.
-COMPLETE VERSION with all original functionality preserved plus decision-making capabilities, no interfaces, no duplication.
+Main legislation analyzer with enhanced dual action inference, decision-making, chunking support, and whole document analysis.
+Enhanced with decision inference capabilities for yes/no/maybe outcomes.
 """
 import json
 import logging
@@ -14,8 +14,8 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from .config import Config
 from .models.rules import LegislationRule, ExtractionResult
-from .models.base_models import CountryMetadata, DocumentChunk, DecisionOutcome, DecisionRule
-from .models.enums import DataRole, DataCategory, DecisionType, DecisionContext, RequiredActionType
+from .models.base_models import CountryMetadata, DocumentChunk
+from .models.enums import DataRole, DataCategory
 from .services.openai_service import OpenAIService
 from .services.metadata_manager import MetadataManager
 from .services.rule_manager import RuleManager
@@ -24,237 +24,18 @@ from .converters.standards_converter import StandardsConverter
 from .prompting.strategies import PromptingStrategies
 from .utils.json_parser import SafeJsonParser
 from .tools.langchain_tools import (
-    extract_rule_conditions_with_decisions, analyze_data_domains_with_decision_context, 
-    identify_roles_responsibilities_with_decision_authority, infer_data_processing_actions_with_decisions,
-    infer_compliance_verification_actions_with_decisions, infer_data_subject_rights_actions_with_decisions,
-    infer_user_actionable_tasks_with_decisions, infer_user_compliance_tasks_with_decisions,
-    infer_user_rights_support_tasks_with_decisions, infer_decision_enabling_actions
+    extract_rule_conditions, analyze_data_domains, identify_roles_responsibilities,
+    infer_data_processing_actions, infer_compliance_verification_actions,
+    infer_data_subject_rights_actions, infer_user_actionable_tasks,
+    infer_user_compliance_tasks, infer_user_rights_support_tasks,
+    infer_decision_scenarios, infer_conditional_permissions
 )
 
 logger = logging.getLogger(__name__)
 
 
-class DecisionInferenceEngine:
-    """Engine for inferring decisions from legislative context - internal use only."""
-    
-    def __init__(self, openai_service: OpenAIService):
-        self.openai_service = openai_service
-        self.json_parser = SafeJsonParser()
-    
-    async def infer_decisions_from_text(self, legislation_text: str, context: str = "") -> List[DecisionOutcome]:
-        """Infer decision outcomes from legislative text."""
-        try:
-            prompt = PromptingStrategies.decision_inference_prompt(legislation_text, context)
-            
-            messages = [
-                SystemMessage(content="You are a legal decision analysis expert. Analyze legislative text to identify decision scenarios and outcomes using logical, testable statements."),
-                HumanMessage(content=prompt)
-            ]
-            
-            response = await self.openai_service.chat_completion(messages)
-            parsed_response = self.json_parser.parse_json_response(response)
-            
-            decisions = []
-            if isinstance(parsed_response, list):
-                for decision_data in parsed_response:
-                    try:
-                        decision = DecisionOutcome.model_validate(decision_data)
-                        decisions.append(decision)
-                    except Exception as e:
-                        logger.warning(f"Error parsing decision outcome: {e}")
-                        continue
-            elif isinstance(parsed_response, dict) and "decisions" in parsed_response:
-                for decision_data in parsed_response["decisions"]:
-                    try:
-                        decision = DecisionOutcome.model_validate(decision_data)
-                        decisions.append(decision)
-                    except Exception as e:
-                        logger.warning(f"Error parsing decision outcome: {e}")
-                        continue
-            
-            return decisions
-            
-        except Exception as e:
-            logger.error(f"Error in decision inference: {e}")
-            return []
-    
-    async def create_decision_rules_from_conditions(self, legislation_rule: LegislationRule) -> List[DecisionRule]:
-        """Create decision rules based on rule conditions and context."""
-        decision_rules = []
-        
-        try:
-            # Analyze the rule to extract decision scenarios
-            rule_text = f"{legislation_rule.description} {legislation_rule.source_article}"
-            
-            # Identify potential decision contexts from conditions
-            decision_contexts = set()
-            for logic_type, conditions in legislation_rule.conditions.items():
-                for condition in conditions:
-                    for domain in condition.data_domain:
-                        domain_value = domain.value if hasattr(domain, 'value') else str(domain)
-                        if domain_value == "data_transfer":
-                            decision_contexts.add(DecisionContext.DATA_TRANSFER)
-                        elif domain_value == "data_usage":
-                            decision_contexts.add(DecisionContext.DATA_PROCESSING)
-                        elif domain_value == "data_storage":
-                            decision_contexts.add(DecisionContext.DATA_STORAGE)
-                        elif domain_value == "data_collection":
-                            decision_contexts.add(DecisionContext.DATA_COLLECTION)
-                        elif domain_value == "data_deletion":
-                            decision_contexts.add(DecisionContext.DATA_DELETION)
-            
-            # Create decision rules for each context
-            for context in decision_contexts:
-                decision_rule = await self._create_decision_rule_for_context(
-                    legislation_rule, context, rule_text
-                )
-                if decision_rule:
-                    decision_rules.append(decision_rule)
-            
-            # If no specific contexts found, create a general processing decision rule
-            if not decision_contexts:
-                general_rule = await self._create_decision_rule_for_context(
-                    legislation_rule, DecisionContext.DATA_PROCESSING, rule_text
-                )
-                if general_rule:
-                    decision_rules.append(general_rule)
-                    
-        except Exception as e:
-            logger.error(f"Error creating decision rules: {e}")
-        
-        return decision_rules
-    
-    async def _create_decision_rule_for_context(
-        self, legislation_rule: LegislationRule, context: DecisionContext, rule_text: str
-    ) -> Optional[DecisionRule]:
-        """Create a decision rule for a specific context."""
-        try:
-            context_questions = {
-                DecisionContext.DATA_TRANSFER: "Can this data be transferred?",
-                DecisionContext.DATA_PROCESSING: "Can this data be processed?",
-                DecisionContext.DATA_STORAGE: "Can this data be stored?",
-                DecisionContext.DATA_COLLECTION: "Can this data be collected?",
-                DecisionContext.DATA_SHARING: "Can this data be shared?",
-                DecisionContext.DATA_DELETION: "Must this data be deleted?",
-                DecisionContext.CONSENT_MANAGEMENT: "Is consent required?",
-                DecisionContext.RIGHTS_EXERCISE: "Can this right be exercised?",
-                DecisionContext.COMPLIANCE_VERIFICATION: "Is compliance verified?"
-            }
-            
-            question = context_questions.get(context, "Is this action permitted?")
-            
-            # Analyze the rule text for decision logic
-            decision_prompt = f"""
-            Based on the following rule information, create a decision rule for the question: "{question}"
-            
-            Rule Text: {rule_text}
-            Rule Description: {legislation_rule.description}
-            Context: {context.value}
-            
-            Determine:
-            1. Default decision if no conditions are met
-            2. Conditions that would change the decision
-            3. Required actions for conditional approvals
-            4. Reasons for prohibitive decisions
-            
-            Look for:
-            - YES indicators: "may", "can", "is permitted", "allowed"
-            - NO indicators: "shall not", "must not", "prohibited", "forbidden"
-            - MAYBE indicators: "provided that", "if", "subject to", "only if"
-            
-            Express all requirements as logical, testable conditions.
-            Do not reference document structure or sources.
-            
-            Return a JSON object with:
-            {{
-                "default_decision": "yes/no/maybe/unknown",
-                "conditional_decisions": [
-                    {{"conditions": ["condition1", "condition2"], "decision": "yes/no/maybe"}}
-                ],
-                "requirements_for_yes": ["requirement1", "requirement2"],
-                "requirements_for_maybe": ["action1", "action2"],
-                "reasons_for_no": ["reason1", "reason2"],
-                "applicable_scenarios": ["scenario1", "scenario2"]
-            }}
-            """
-            
-            messages = [
-                SystemMessage(content="You are a legal decision rule expert. Create structured decision rules from legislative text using logical, testable conditions."),
-                HumanMessage(content=decision_prompt)
-            ]
-            
-            response = await self.openai_service.chat_completion(messages)
-            parsed_response = self.json_parser.parse_json_response(response)
-            
-            if "error" in parsed_response:
-                logger.warning(f"Error parsing decision rule response: {parsed_response}")
-                return None
-            
-            # Convert string actions to enum values
-            requirements_for_maybe = []
-            if "requirements_for_maybe" in parsed_response:
-                for req in parsed_response["requirements_for_maybe"]:
-                    try:
-                        # Map common requirement strings to enum values
-                        if "mask" in req.lower():
-                            requirements_for_maybe.append(RequiredActionType.DATA_MASKING)
-                        elif "encrypt" in req.lower():
-                            requirements_for_maybe.append(RequiredActionType.DATA_ENCRYPTION)
-                        elif "consent" in req.lower():
-                            requirements_for_maybe.append(RequiredActionType.CONSENT_OBTAINMENT)
-                        elif "safeguard" in req.lower():
-                            requirements_for_maybe.append(RequiredActionType.SAFEGUARDS_IMPLEMENTATION)
-                        elif "adequacy" in req.lower():
-                            requirements_for_maybe.append(RequiredActionType.ADEQUACY_VERIFICATION)
-                        elif "document" in req.lower():
-                            requirements_for_maybe.append(RequiredActionType.DOCUMENTATION_COMPLETION)
-                        elif "assess" in req.lower():
-                            requirements_for_maybe.append(RequiredActionType.IMPACT_ASSESSMENT)
-                        elif "approval" in req.lower():
-                            requirements_for_maybe.append(RequiredActionType.APPROVAL_OBTAINMENT)
-                        elif "notification" in req.lower():
-                            requirements_for_maybe.append(RequiredActionType.NOTIFICATION_COMPLETION)
-                        elif "security" in req.lower():
-                            requirements_for_maybe.append(RequiredActionType.SECURITY_MEASURES)
-                        elif "access" in req.lower():
-                            requirements_for_maybe.append(RequiredActionType.ACCESS_CONTROLS)
-                        else:
-                            # Default to documentation for unrecognized requirements
-                            requirements_for_maybe.append(RequiredActionType.DOCUMENTATION_COMPLETION)
-                    except Exception:
-                        continue
-            
-            # Determine default decision
-            default_decision = DecisionType.UNKNOWN
-            if "default_decision" in parsed_response:
-                try:
-                    default_decision = DecisionType(parsed_response["default_decision"].lower())
-                except ValueError:
-                    default_decision = DecisionType.UNKNOWN
-            
-            decision_rule = DecisionRule(
-                id=f"decision_{legislation_rule.id}_{context.value}",
-                question=question,
-                context=context,
-                default_decision=default_decision,
-                conditional_decisions=parsed_response.get("conditional_decisions", []),
-                requirements_for_yes=parsed_response.get("requirements_for_yes", []),
-                requirements_for_maybe=requirements_for_maybe,
-                reasons_for_no=parsed_response.get("reasons_for_no", []),
-                source_rule_id=legislation_rule.id,
-                confidence_score=0.8,
-                applicable_scenarios=parsed_response.get("applicable_scenarios", [])
-            )
-            
-            return decision_rule
-            
-        except Exception as e:
-            logger.error(f"Error creating decision rule for context {context}: {e}")
-            return None
-
-
 class LegislationAnalyzer:
-    """Main analyzer with enhanced dual action inference, chunking support, whole document analysis, and decision inference."""
+    """Main analyzer with enhanced dual action inference, decision-making, chunking support, and whole document analysis."""
 
     def __init__(self):
         self.openai_service = OpenAIService()
@@ -263,7 +44,6 @@ class LegislationAnalyzer:
         self.metadata_manager = MetadataManager()
         self.multi_level_processor = MultiLevelPDFProcessor()
         self.standards_converter = StandardsConverter()
-        self.decision_engine = DecisionInferenceEngine(self.openai_service)
 
         # Initialize LangChain model
         self.llm = ChatOpenAI(
@@ -272,25 +52,26 @@ class LegislationAnalyzer:
             openai_api_base=Config.BASE_URL
         )
 
-        # Create react agent with all tools including decision-enabled tools
+        # Create react agent with all tools including decision inference
         self.tools = [
-            extract_rule_conditions_with_decisions,
-            analyze_data_domains_with_decision_context, 
-            identify_roles_responsibilities_with_decision_authority,
-            infer_data_processing_actions_with_decisions,
-            infer_compliance_verification_actions_with_decisions,
-            infer_data_subject_rights_actions_with_decisions,
-            infer_user_actionable_tasks_with_decisions,
-            infer_user_compliance_tasks_with_decisions,
-            infer_user_rights_support_tasks_with_decisions,
-            infer_decision_enabling_actions
+            extract_rule_conditions,
+            analyze_data_domains, 
+            identify_roles_responsibilities,
+            infer_data_processing_actions,
+            infer_compliance_verification_actions,
+            infer_data_subject_rights_actions,
+            infer_user_actionable_tasks,
+            infer_user_compliance_tasks,
+            infer_user_rights_support_tasks,
+            infer_decision_scenarios,
+            infer_conditional_permissions
         ]
 
         self.memory = MemorySaver()
         self.agent = create_react_agent(self.llm, self.tools, checkpointer=self.memory)
 
     async def process_legislation_folder(self, folder_path: str = None) -> ExtractionResult:
-        """Process all configured legislation entries with decision inference - no duplication."""
+        """Process all configured legislation entries with decision inference."""
         if folder_path is None:
             folder_path = Config.LEGISLATION_PDF_PATH
 
@@ -307,7 +88,6 @@ class LegislationAnalyzer:
                 total_rules=0,
                 total_actions=0,
                 total_user_actions=0,
-                total_decision_rules=0,
                 total_decisions=0,
                 processing_time=0.0
             )
@@ -315,11 +95,7 @@ class LegislationAnalyzer:
         all_new_rules = []
         documents_processed = {}
         chunking_metadata = {}
-        decision_contexts = set()
         start_time = datetime.utcnow()
-        
-        # Track processed content to avoid duplication
-        processed_content_hashes = set()
 
         for entry_id, metadata in processing_entries:
             try:
@@ -344,15 +120,13 @@ class LegislationAnalyzer:
                             "overlap_size": Config.OVERLAP_SIZE
                         }
 
-                result = await self.analyze_legislation_with_levels_and_decisions(
+                result = await self.analyze_legislation_with_levels(
                     entry_documents=entry_documents,
                     entry_id=entry_id,
-                    metadata=metadata,
-                    processed_content_hashes=processed_content_hashes
+                    metadata=metadata
                 )
 
                 all_new_rules.extend(result.rules)
-                decision_contexts.update(result.decision_contexts)
 
             except Exception as e:
                 logger.error(f"Error processing entry {entry_id}: {e}")
@@ -362,8 +136,7 @@ class LegislationAnalyzer:
         total_processing_time = (end_time - start_time).total_seconds()
         total_actions = sum(len(rule.actions) for rule in all_new_rules)
         total_user_actions = sum(len(rule.user_actions) for rule in all_new_rules)
-        total_decision_rules = sum(len(rule.decision_rules) for rule in all_new_rules)
-        total_decisions = sum(1 for rule in all_new_rules if rule.decision_outcome or rule.decision_rules)
+        total_decisions = sum(len(rule.decisions) for rule in all_new_rules)
 
         if all_new_rules:
             rule_texts = [f"{rule.description} {rule.source_article}" for rule in all_new_rules]
@@ -371,7 +144,6 @@ class LegislationAnalyzer:
         else:
             embeddings = []
 
-        # Save rules without duplication
         if all_new_rules:
             self.rule_manager.save_rules(all_new_rules)
 
@@ -386,13 +158,11 @@ class LegislationAnalyzer:
 
         result = ExtractionResult(
             rules=all_new_rules,
-            summary=f"Processed {len(processing_entries)} entries, extracted {len(all_new_rules)} rules with {total_actions} rule actions, {total_user_actions} user actions, {total_decision_rules} decision rules, and {total_decisions} decision-enabled rules",
+            summary=f"Processed {len(processing_entries)} entries, extracted {len(all_new_rules)} rules with {total_actions} rule actions, {total_user_actions} user actions, and {total_decisions} decisions",
             total_rules=len(all_new_rules),
             total_actions=total_actions,
             total_user_actions=total_user_actions,
-            total_decision_rules=total_decision_rules,
             total_decisions=total_decisions,
-            decision_contexts=list(decision_contexts),
             processing_time=total_processing_time,
             embeddings=embeddings,
             integrated_rules=integrated_rules,
@@ -402,14 +172,13 @@ class LegislationAnalyzer:
 
         return result
 
-    async def analyze_legislation_with_levels_and_decisions(
+    async def analyze_legislation_with_levels(
         self, 
         entry_documents: Dict[str, Union[str, List[DocumentChunk]]],
         entry_id: str,
-        metadata: CountryMetadata,
-        processed_content_hashes: set
+        metadata: CountryMetadata
     ) -> ExtractionResult:
-        """Analyze legislation from multiple document levels with chunking support, whole document analysis, and decision inference - no duplication."""
+        """Analyze legislation from multiple document levels with chunking support, whole document analysis, and decision inference."""
         start_time = datetime.utcnow()
 
         try:
@@ -427,7 +196,6 @@ class LegislationAnalyzer:
             """
 
             all_rules = []
-            decision_contexts = set()
 
             # Enhanced: First pass - comprehensive document understanding with decision inference
             for level, content in entry_documents.items():
@@ -436,15 +204,7 @@ class LegislationAnalyzer:
                 if isinstance(content, list):  # Chunked document
                     # For chunked documents, first get overall understanding
                     full_text = "\n\n".join([chunk.content for chunk in content])
-                    
-                    # Check for content duplication
-                    content_hash = hash(full_text)
-                    if content_hash in processed_content_hashes:
-                        logger.info(f"Skipping duplicate content in {level}")
-                        continue
-                    processed_content_hashes.add(content_hash)
-                    
-                    comprehensive_analysis = await self._apply_comprehensive_document_analysis_with_decisions(
+                    comprehensive_analysis = await self._apply_comprehensive_document_analysis(
                         full_text, existing_context + metadata_context, level, f"Full document with {len(content)} chunks"
                     )
 
@@ -452,7 +212,7 @@ class LegislationAnalyzer:
                     for chunk in content:
                         chunk_info = f"Chunk {chunk.chunk_index + 1} of {chunk.total_chunks} (positions {chunk.start_pos}-{chunk.end_pos})"
 
-                        chunk_rules = await self._process_text_chunk_with_context_and_decisions(
+                        chunk_rules = await self._process_text_chunk_with_context(
                             text=chunk.content,
                             chunk_reference=chunk.chunk_id,
                             entry_id=entry_id,
@@ -465,29 +225,14 @@ class LegislationAnalyzer:
                         )
 
                         all_rules.extend(chunk_rules)
-                        
-                        # Collect decision contexts
-                        for rule in chunk_rules:
-                            if rule.decision_outcome:
-                                decision_contexts.add(rule.decision_outcome.context.value)
-                            for decision_rule in rule.decision_rules:
-                                decision_contexts.add(decision_rule.context.value)
-                        
                         logger.info(f"Processed {len(chunk_rules)} rules from chunk {chunk.chunk_index + 1}")
 
                 else:  # Single document
-                    # Check for content duplication
-                    content_hash = hash(content)
-                    if content_hash in processed_content_hashes:
-                        logger.info(f"Skipping duplicate content in {level}")
-                        continue
-                    processed_content_hashes.add(content_hash)
-                    
-                    comprehensive_analysis = await self._apply_comprehensive_document_analysis_with_decisions(
+                    comprehensive_analysis = await self._apply_comprehensive_document_analysis(
                         content, existing_context + metadata_context, level, ""
                     )
 
-                    level_rules = await self._process_text_chunk_with_context_and_decisions(
+                    level_rules = await self._process_text_chunk_with_context(
                         text=content,
                         chunk_reference=None,
                         entry_id=entry_id,
@@ -500,14 +245,6 @@ class LegislationAnalyzer:
                     )
 
                     all_rules.extend(level_rules)
-                    
-                    # Collect decision contexts
-                    for rule in level_rules:
-                        if rule.decision_outcome:
-                            decision_contexts.add(rule.decision_outcome.context.value)
-                        for decision_rule in rule.decision_rules:
-                            decision_contexts.add(decision_rule.context.value)
-                    
                     logger.info(f"Processed {len(level_rules)} rules from {level} document")
 
             if all_rules:
@@ -529,43 +266,40 @@ class LegislationAnalyzer:
             processing_time = (end_time - start_time).total_seconds()
             total_actions = sum(len(rule.actions) for rule in all_rules)
             total_user_actions = sum(len(rule.user_actions) for rule in all_rules)
-            total_decision_rules = sum(len(rule.decision_rules) for rule in all_rules)
-            total_decisions = sum(1 for rule in all_rules if rule.decision_outcome or rule.decision_rules)
+            total_decisions = sum(len(rule.decisions) for rule in all_rules)
 
             result = ExtractionResult(
                 rules=all_rules,
-                summary=f"Extracted {len(all_rules)} rules with {total_actions} rule actions, {total_user_actions} user actions, {total_decision_rules} decision rules, and {total_decisions} decision-enabled rules from {entry_id}",
+                summary=f"Extracted {len(all_rules)} rules with {total_actions} rule actions, {total_user_actions} user actions, and {total_decisions} decisions from {entry_id}",
                 total_rules=len(all_rules),
                 total_actions=total_actions,
                 total_user_actions=total_user_actions,
-                total_decision_rules=total_decision_rules,
                 total_decisions=total_decisions,
-                decision_contexts=list(decision_contexts),
                 processing_time=processing_time,
                 embeddings=embeddings,
                 integrated_rules=integrated_rules,
                 documents_processed={entry_id: list(entry_documents.keys())}
             )
 
-            logger.info(f"Analysis completed: {len(all_rules)} rules with {total_actions} rule actions, {total_user_actions} user actions, {total_decision_rules} decision rules, and {total_decisions} decision-enabled rules extracted in {processing_time:.2f}s")
+            logger.info(f"Analysis completed: {len(all_rules)} rules with {total_actions} rule actions, {total_user_actions} user actions, and {total_decisions} decisions extracted in {processing_time:.2f}s")
             return result
 
         except Exception as e:
-            logger.error(f"Error analyzing legislation with levels and decisions: {e}")
+            logger.error(f"Error analyzing legislation with levels: {e}")
             raise
 
-    async def _apply_comprehensive_document_analysis_with_decisions(self, legislation_text: str, existing_context: str = "", level: str = "level_1", chunk_info: str = "") -> str:
-        """Apply comprehensive document analysis to understand the entire document with decision inference."""
+    async def _apply_comprehensive_document_analysis(self, legislation_text: str, existing_context: str = "", level: str = "level_1", chunk_info: str = "") -> str:
+        """Apply comprehensive document analysis to understand the entire document."""
         prompt = PromptingStrategies.comprehensive_document_analysis_prompt(legislation_text, existing_context, level, chunk_info)
 
         messages = [
-            SystemMessage(content="You are a legal text analyst with decision inference capabilities. Analyze the ENTIRE document comprehensively including decision-making scenarios. Use logical, testable statements without referencing document structure."),
+            SystemMessage(content="You are a legal text analyst. Analyze the ENTIRE document comprehensively. Use simple, clear English without document references."),
             HumanMessage(content=prompt)
         ]
 
         return await self.openai_service.chat_completion(messages)
 
-    async def _process_text_chunk_with_context_and_decisions(
+    async def _process_text_chunk_with_context(
         self,
         text: str,
         chunk_reference: Optional[str],
@@ -579,23 +313,28 @@ class LegislationAnalyzer:
     ) -> List[LegislationRule]:
         """Process a single text chunk with full document context and decision inference."""
 
-        # Step 1: Focused analysis with comprehensive context and decision inference
-        focused_analysis = await self._apply_focused_analysis_with_context_and_decisions(
+        # Step 1: Focused analysis with comprehensive context
+        focused_analysis = await self._apply_focused_analysis_with_context(
             text, existing_context + metadata_context, level, chunk_info, comprehensive_analysis
         )
 
-        # Step 2: Expert verification including decision logic
-        verified_analysis = await self._apply_expert_verification_with_decisions(
+        # Step 2: Expert verification
+        verified_analysis = await self._apply_expert_verification(
             text, focused_analysis, level
         )
 
-        # Step 3: Use react agent for TRIPLE action inference (rule + user + decision-enabling actions) with document context
-        agent_analysis = await self._run_triple_action_inference_agent_with_context(
+        # Step 3: Use react agent for DUAL action inference with document context
+        agent_analysis = await self._run_dual_action_inference_agent_with_context(
             text, f"{entry_id} - {level}", metadata.country, chunk_reference, comprehensive_analysis
         )
 
-        # Step 4: Synthesize into rules with TRIPLE actions and decision inference
-        rules = await self._synthesize_rules_with_triple_actions_and_decisions(
+        # Step 4: Decision inference
+        decision_analysis = await self._run_decision_inference_agent(
+            text, focused_analysis, agent_analysis, f"{entry_id} - {level}", metadata.country
+        )
+
+        # Step 5: Synthesize into rules with DUAL actions, full context, and decisions
+        rules = await self._synthesize_rules_with_dual_actions_decisions_and_context(
             legislation_text=text,
             article_reference=f"{entry_id} - {level}",
             source_files={
@@ -612,70 +351,37 @@ class LegislationAnalyzer:
             focused_analysis=focused_analysis,
             verified_analysis=verified_analysis,
             agent_analysis=agent_analysis,
-            comprehensive_analysis=comprehensive_analysis
+            comprehensive_analysis=comprehensive_analysis,
+            decision_analysis=decision_analysis
         )
 
-        # Step 5: Add decision inference to each rule
-        enhanced_rules = []
-        for rule in rules:
-            try:
-                # Infer decisions from the rule context
-                decisions = await self.decision_engine.infer_decisions_from_text(
-                    text, f"Rule: {rule.description}"
-                )
-                
-                # Add primary decision if found
-                if decisions:
-                    rule.decision_outcome = decisions[0]  # Use the first/primary decision
-                
-                # Create decision rules based on conditions
-                decision_rules = await self.decision_engine.create_decision_rules_from_conditions(rule)
-                rule.decision_rules = decision_rules
-                
-                # Update enables_decisions list
-                if rule.decision_outcome:
-                    context = rule.decision_outcome.context.value
-                    decision = rule.decision_outcome.decision.value
-                    rule.enables_decisions.append(f"{decision} for {context}")
-                
-                for decision_rule in decision_rules:
-                    context = decision_rule.context.value
-                    rule.enables_decisions.append(f"decision framework for {context}")
-                
-                enhanced_rules.append(rule)
-                
-            except Exception as e:
-                logger.warning(f"Error adding decision inference to rule {rule.id}: {e}")
-                # Add rule without decision enhancement
-                enhanced_rules.append(rule)
+        return rules
 
-        return enhanced_rules
-
-    async def _apply_focused_analysis_with_context_and_decisions(self, legislation_text: str, existing_context: str = "", level: str = "level_1", chunk_info: str = "", comprehensive_analysis: str = "") -> str:
-        """Apply focused analysis with comprehensive document context and decision inference."""
+    async def _apply_focused_analysis_with_context(self, legislation_text: str, existing_context: str = "", level: str = "level_1", chunk_info: str = "", comprehensive_analysis: str = "") -> str:
+        """Apply focused analysis with comprehensive document context."""
         context_section = f"\n\nCOMPREHENSIVE DOCUMENT ANALYSIS:\n{comprehensive_analysis}\n" if comprehensive_analysis else ""
-        prompt = PromptingStrategies.focused_analysis_with_decision_inference_prompt(legislation_text, existing_context + context_section, level, chunk_info)
+        prompt = PromptingStrategies.focused_analysis_prompt(legislation_text, existing_context + context_section, level, chunk_info)
 
         messages = [
-            SystemMessage(content="You are a legal text analyst with decision inference capabilities. Analyze only what is present in the legislation text using the comprehensive document context. Include decision-making analysis using logical, testable statements."),
+            SystemMessage(content="You are a legal text analyst. Analyze only what is present in the legislation text using the comprehensive document context. Use simple, clear English without document references."),
             HumanMessage(content=prompt)
         ]
 
         return await self.openai_service.chat_completion(messages)
 
-    async def _apply_expert_verification_with_decisions(self, legislation_text: str, preliminary_analysis: str, level: str = "level_1") -> str:
-        """Apply expert verification to validate findings including decision logic."""
-        prompt = PromptingStrategies.expert_verification_with_decisions_prompt(legislation_text, preliminary_analysis, level)
+    async def _apply_expert_verification(self, legislation_text: str, preliminary_analysis: str, level: str = "level_1") -> str:
+        """Apply expert verification to validate findings."""
+        prompt = PromptingStrategies.expert_verification_prompt(legislation_text, preliminary_analysis, level)
 
         messages = [
-            SystemMessage(content="You are a legal compliance expert with decision analysis expertise. Verify analysis accuracy against source text including decision logic using logical, testable statements."),
+            SystemMessage(content="You are a legal compliance expert. Verify analysis accuracy against source text. Use simple, clear English without document references."),
             HumanMessage(content=prompt)
         ]
 
         return await self.openai_service.chat_completion(messages)
 
-    async def _run_triple_action_inference_agent_with_context(self, legislation_text: str, article_reference: str, countries: List[str], chunk_reference: Optional[str] = None, comprehensive_analysis: str = "") -> str:
-        """Run react agent for TRIPLE action inference (rule + user + decision-enabling) with comprehensive document context."""
+    async def _run_dual_action_inference_agent_with_context(self, legislation_text: str, article_reference: str, countries: List[str], chunk_reference: Optional[str] = None, comprehensive_analysis: str = "") -> str:
+        """Run react agent for DUAL action inference with comprehensive document context."""
         try:
             config = {"configurable": {"thread_id": f"analysis_{datetime.utcnow().timestamp()}"}}
 
@@ -683,7 +389,7 @@ class LegislationAnalyzer:
             context_section = f"\n\nCOMPREHENSIVE DOCUMENT CONTEXT:\n{comprehensive_analysis}\n" if comprehensive_analysis else ""
 
             message = f"""
-            Analyze the following legislation text and infer THREE TYPES of actions: organizational rule actions, practical user actions, AND decision-enabling actions.
+            Analyze the following legislation text and infer BOTH organizational rule actions AND practical user actions.
             {context_section}
 
             Article: {article_reference}{chunk_info}
@@ -691,9 +397,9 @@ class LegislationAnalyzer:
             Text: {legislation_text}
 
             Use the available tools to:
-            1. Identify specific rule conditions related to data processing with decision impact
-            2. Analyze data domains and categories involved with decision contexts
-            3. Identify roles and responsibilities for data handling with decision authority
+            1. Identify specific rule conditions related to data processing
+            2. Analyze data domains and categories involved
+            3. Identify roles and responsibilities for data handling
 
             ORGANIZATIONAL ACTION INFERENCE (Rule Actions):
             4. Infer data processing actions required by organizations/controllers/processors
@@ -707,25 +413,15 @@ class LegislationAnalyzer:
             10. Infer user compliance tasks for individual compliance
             11. Infer user rights support tasks that individuals can implement
 
-            DECISION-ENABLING ACTION INFERENCE (Decision Actions):
-            12. Infer actions that enable or change decision outcomes
-            13. Focus on actions required for conditional permissions
-            14. Identify actions that convert "maybe" decisions to "yes" decisions
-            15. Map actions to decision contexts (transfer, processing, storage, etc.)
-
             FOCUS CONSTRAINTS:
             - RULE ACTIONS: Organizational, policy-level, systematic data actions
             - USER ACTIONS: Individual, practical, implementable data tasks
-            - DECISION ACTIONS: Actions that enable, condition, or change decision outcomes
             - Base ALL actions on explicit legislative requirements
             - Focus on concrete data operations: encryption, masking, access control, deletion, backup
-            - Express actions as logical, testable requirements
-            - Do not reference document structure or sources in action descriptions
+            - Ensure actions reference specific articles and are in simple English without document references
             - Use the comprehensive document context to understand relationships
-            - Identify decision scenarios and conditional requirements
 
-            Provide analysis that enables creation of machine-readable rules with organizational rule actions, practical user actions, AND decision-enabling actions.
-            Express all findings as logical, actionable statements without document references.
+            Provide analysis that enables creation of machine-readable rules with BOTH organizational rule actions AND practical user actions.
             """
 
             result = self.agent.invoke(
@@ -743,10 +439,71 @@ class LegislationAnalyzer:
             return "Agent analysis completed but no content returned"
 
         except Exception as e:
-            logger.error(f"Error running triple action inference agent: {e}")
+            logger.error(f"Error running dual action inference agent: {e}")
             return f"Error in agent analysis: {str(e)}"
 
-    async def _synthesize_rules_with_triple_actions_and_decisions(
+    async def _run_decision_inference_agent(self, legislation_text: str, focused_analysis: str, agent_analysis: str, article_reference: str, countries: List[str]) -> str:
+        """Run react agent for decision inference with yes/no/maybe outcomes."""
+        try:
+            config = {"configurable": {"thread_id": f"decision_analysis_{datetime.utcnow().timestamp()}"}}
+
+            message = f"""
+            Analyze the following legislation text and previous analyses to identify decision scenarios with yes/no/maybe outcomes.
+
+            Article: {article_reference}
+            Countries: {', '.join(countries)}
+            Text: {legislation_text}
+
+            Previous Focused Analysis: {focused_analysis}
+            Previous Agent Analysis: {agent_analysis}
+
+            Use the available tools to:
+            1. Infer decision scenarios that result in yes/no/maybe outcomes
+            2. Identify conditional permissions and their requirements
+            3. Focus on practical decision points like:
+               - Cross-border data transfers (allowed/prohibited/conditional)
+               - Data processing authorizations (permitted/forbidden/requires safeguards)
+               - Consent requirements (required/not required/depends on circumstances)
+               - Data sharing permissions (allowed/prohibited/needs additional protection)
+               - Automated decision making (permitted/forbidden/requires oversight)
+               - Compliance assessments (compliant/non-compliant/needs additional measures)
+
+            DECISION INFERENCE REQUIREMENTS:
+            - Base ALL decisions on explicit legislative requirements
+            - Identify clear conditions for yes/no/maybe outcomes
+            - Link decisions to specific actions required for compliance
+            - Use simple, clear English without legal jargon or document references
+            - Focus on practical, implementable decision scenarios
+            - Ensure decisions are logical and traceable to source text
+
+            EXAMPLES OF DECISION SCENARIOS:
+            - "Data transfer to third country is allowed if adequate protection is ensured" → MAYBE (requires adequate protection)
+            - "Processing sensitive data requires explicit consent" → NO unless consent obtained
+            - "Automated decision making requires human oversight" → MAYBE (requires human oversight)
+            - "Personal data must be deleted when purpose is fulfilled" → YES for deletion when purpose ends
+
+            Provide decision analysis that enables creation of machine-readable decision rules with clear yes/no/maybe logic.
+            """
+
+            result = self.agent.invoke(
+                {"messages": [HumanMessage(content=message)]},
+                config
+            )
+
+            if result and "messages" in result:
+                last_message = result["messages"][-1]
+                if hasattr(last_message, 'content'):
+                    return last_message.content
+                elif isinstance(last_message, dict) and 'content' in last_message:
+                    return last_message['content']
+
+            return "Decision inference completed but no content returned"
+
+        except Exception as e:
+            logger.error(f"Error running decision inference agent: {e}")
+            return f"Error in decision analysis: {str(e)}"
+
+    async def _synthesize_rules_with_dual_actions_decisions_and_context(
         self, 
         legislation_text: str,
         article_reference: str,
@@ -760,15 +517,16 @@ class LegislationAnalyzer:
         focused_analysis: str,
         verified_analysis: str,
         agent_analysis: str,
-        comprehensive_analysis: str
+        comprehensive_analysis: str,
+        decision_analysis: str
     ) -> List[LegislationRule]:
-        """Synthesize all analyses into comprehensive structured rules with maximum rule extraction and decision inference."""
+        """Synthesize all analyses into comprehensive structured rules with maximum rule extraction and decision support."""
 
         applicable_countries_json = json.dumps(applicable_countries)
         adequacy_countries_json = json.dumps(adequacy_countries)
         source_files_json = json.dumps(source_files)
 
-        synthesis_prompt = PromptingStrategies.synthesis_with_decisions_prompt_template(
+        synthesis_prompt = PromptingStrategies.synthesis_prompt_template(
             legislation_text=legislation_text,
             article_reference=article_reference,
             source_files=source_files_json,
@@ -781,11 +539,12 @@ class LegislationAnalyzer:
             focused_analysis=focused_analysis,
             verified_analysis=verified_analysis,
             agent_analysis=agent_analysis,
-            comprehensive_analysis=comprehensive_analysis
+            comprehensive_analysis=comprehensive_analysis,
+            decision_analysis=decision_analysis
         )
 
         messages = [
-            SystemMessage(content="You are a comprehensive legal-tech expert with decision analysis capabilities. Extract EVERY possible rule from the legislation including decision-making scenarios. Create multiple specific rules rather than trying to combine everything. Use logical, testable statements without document references. Focus on practical data operations and decision outcomes."),
+            SystemMessage(content="You are a comprehensive legal-tech expert. Extract EVERY possible rule and decision from the legislation. Create multiple specific rules rather than trying to combine everything. Use simple, clear English without document references. Focus on practical data operations and decision scenarios."),
             HumanMessage(content=synthesis_prompt)
         ]
 
@@ -810,31 +569,24 @@ class LegislationAnalyzer:
                 try:
                     # Ensure critical fields are populated
                     rule_data.setdefault("id", f"synthesis_rule_{datetime.utcnow().timestamp()}")
-                    rule_data.setdefault("name", "Legislative Rule with Decision Capability")
-                    rule_data.setdefault("description", "Rule extracted from legislation with decision inference")
+                    rule_data.setdefault("name", "Legislative Rule")
+                    rule_data.setdefault("description", "Rule extracted from legislation")
 
-                    # Use advanced inference for role and data category
+                    # CORRECTED: Use proper prompting strategies for role inference
                     if not rule_data.get("primary_impacted_role"):
                         rule_data["primary_impacted_role"] = await self._infer_primary_role_advanced(legislation_text)
 
+                    # CORRECTED: Use proper prompting strategies for data category inference
                     if not rule_data.get("data_category") or len(rule_data.get("data_category", [])) == 0:
                         rule_data["data_category"] = await self._infer_data_categories_advanced(legislation_text)
 
                     # Process remaining fields with validation
-                    rule_data = self._validate_and_fix_rule_data_with_decisions(
-                        rule_data, article_reference, source_files, applicable_countries, 
-                        adequacy_countries, document_level, chunk_reference
-                    )
+                    rule_data = self._validate_and_fix_rule_data(rule_data, article_reference, source_files, applicable_countries, adequacy_countries, document_level, chunk_reference)
 
                     # Validate and create the rule using Pydantic
                     rule = LegislationRule.model_validate(rule_data)
                     rules.append(rule)
-                    
-                    decision_info = ""
-                    if rule.decision_outcome or rule.decision_rules:
-                        decision_info = f" with decision capabilities"
-                    
-                    logger.info(f"Successfully created comprehensive rule: {rule.name} with {len(rule.actions)} actions, {len(rule.user_actions)} user actions{decision_info}")
+                    logger.info(f"Successfully created comprehensive rule: {rule.name} with {len(rule.actions)} actions, {len(rule.user_actions)} user actions, and {len(rule.decisions)} decisions")
 
                 except Exception as e:
                     logger.warning(f"Skipping invalid rule due to error: {e}")
@@ -846,7 +598,7 @@ class LegislationAnalyzer:
         # If no rules were created, create minimal rules to ensure coverage
         if not rules:
             logger.warning("No rules could be parsed, creating comprehensive minimal rules from legislation")
-            minimal_rules = await self._create_comprehensive_minimal_rules_with_decisions(
+            minimal_rules = await self._create_comprehensive_minimal_rules(
                 legislation_text, article_reference, source_files, document_level, 
                 chunk_reference, applicable_countries, adequacy_countries
             )
@@ -855,7 +607,7 @@ class LegislationAnalyzer:
         return rules
 
     async def _infer_primary_role_advanced(self, legislation_text: str) -> str:
-        """Infer primary impacted role using advanced prompting strategies."""
+        """CORRECTED: Infer primary impacted role using advanced prompting strategies."""
         try:
             prompt = PromptingStrategies.role_inference_prompt(legislation_text)
             
@@ -866,12 +618,14 @@ class LegislationAnalyzer:
 
             response = await self.openai_service.chat_completion(messages)
             
+            # Clean and validate response
             role = response.strip().lower()
             valid_roles = ["controller", "processor", "joint_controller", "data_subject"]
             
             if role in valid_roles:
                 return role
             else:
+                # Fallback to keyword analysis
                 return self._infer_primary_role_fallback(legislation_text)
                 
         except Exception as e:
@@ -882,6 +636,7 @@ class LegislationAnalyzer:
         """Fallback role inference using keyword matching."""
         text_lower = legislation_text.lower()
         
+        # Simple keyword-based inference
         if "controller" in text_lower and text_lower.count("controller") > text_lower.count("processor"):
             return "controller"
         elif "processor" in text_lower and text_lower.count("processor") > text_lower.count("controller"):
@@ -891,10 +646,10 @@ class LegislationAnalyzer:
         elif "joint" in text_lower and "controller" in text_lower:
             return "joint_controller"
         else:
-            return "controller"
+            return "controller"  # Default
 
     async def _infer_data_categories_advanced(self, legislation_text: str) -> List[str]:
-        """Infer data categories using advanced prompting strategies."""
+        """CORRECTED: Infer data categories using advanced prompting strategies."""
         try:
             prompt = PromptingStrategies.data_category_inference_prompt(legislation_text)
             
@@ -904,9 +659,12 @@ class LegislationAnalyzer:
             ]
 
             response = await self.openai_service.chat_completion(messages)
+            
+            # Parse JSON response
             parsed_response = self.json_parser.parse_json_response(response)
             
             if "error" not in parsed_response and isinstance(parsed_response, list):
+                # Validate categories
                 valid_categories = [
                     "personal_data", "sensitive_data", "biometric_data", "health_data",
                     "financial_data", "location_data", "behavioral_data", "identification_data"
@@ -920,6 +678,7 @@ class LegislationAnalyzer:
                 if result_categories:
                     return result_categories
                     
+            # Fallback to keyword analysis
             return self._infer_data_categories_fallback(legislation_text)
                 
         except Exception as e:
@@ -931,6 +690,7 @@ class LegislationAnalyzer:
         text_lower = legislation_text.lower()
         categories = []
         
+        # Map keywords to categories
         category_keywords = {
             "sensitive_data": ["sensitive", "special category", "special categories"],
             "health_data": ["health", "medical", "healthcare"],
@@ -945,6 +705,7 @@ class LegislationAnalyzer:
             if any(keyword in text_lower for keyword in keywords):
                 categories.append(category)
         
+        # Always include personal_data if no specific categories found
         if not categories:
             categories.append("personal_data")
         elif "personal_data" not in categories and "personal data" in text_lower:
@@ -952,12 +713,8 @@ class LegislationAnalyzer:
             
         return categories
 
-    def _validate_and_fix_rule_data_with_decisions(
-        self, rule_data: dict, article_reference: str, source_files: dict, 
-        applicable_countries: List[str], adequacy_countries: List[str], 
-        document_level: str, chunk_reference: Optional[str]
-    ) -> dict:
-        """Validate and fix rule data structure with decision capabilities."""
+    def _validate_and_fix_rule_data(self, rule_data: dict, article_reference: str, source_files: dict, applicable_countries: List[str], adequacy_countries: List[str], document_level: str, chunk_reference: Optional[str]) -> dict:
+        """Validate and fix rule data structure."""
         
         # Ensure required fields
         rule_data.setdefault("source_article", article_reference)
@@ -983,95 +740,79 @@ class LegislationAnalyzer:
         else:
             rule_data.setdefault("confidence_score", 0.8)
 
-        # Ensure event field exists with decision context
+        # Ensure event field exists
         if "event" not in rule_data:
-            rule_data["event"] = {
-                "type": "compliance_required", 
-                "params": {},
-                "decision_context": "data_processing"
-            }
+            rule_data["event"] = {"type": "compliance_required", "params": {}}
 
-        # Fix conditions structure with decision impact - ensure logical statements
+        # Fix conditions structure
         if "conditions" not in rule_data:
             rule_data["conditions"] = {
                 "all": [{
-                    "fact": f"legislative_requirement_applies",
+                    "fact": f"legislative_requirement_{rule_data.get('name', 'default').lower().replace(' ', '_')}",
                     "operator": "equal",
                     "value": True,
-                    "description": f"When legislative requirement for {rule_data.get('description', 'compliance')} applies",
+                    "description": f"When {rule_data.get('description', 'legislative requirement')} applies",
                     "data_domain": ["data_usage"],
                     "role": rule_data.get("primary_impacted_role", "controller"),
-                    "reasoning": f"Condition extracted from legislative text requiring compliance",
+                    "reasoning": f"Condition extracted from {article_reference}",
                     "document_level": document_level,
-                    "chunk_reference": chunk_reference or "none",
-                    "decision_impact": "maybe",
-                    "conditional_requirement": "documentation_completion"
+                    "chunk_reference": chunk_reference or "none"
                 }]
             }
 
-        # Ensure actions, user_actions, and decision-related fields are lists
+        # Ensure actions, user_actions, and decisions are lists
         rule_data.setdefault("actions", [])
         rule_data.setdefault("user_actions", [])
-        rule_data.setdefault("decision_rules", [])
-        rule_data.setdefault("enables_decisions", [])
-
-        # Set extraction method to include decision inference
-        rule_data["extraction_method"] = "llm_analysis_with_decision_inference"
+        rule_data.setdefault("decisions", [])
 
         return rule_data
 
-    async def _create_comprehensive_minimal_rules_with_decisions(
+    async def _create_comprehensive_minimal_rules(
         self, legislation_text: str, article_reference: str, source_files: Dict[str, Optional[str]],
         document_level: str, chunk_reference: Optional[str], applicable_countries: List[str], 
         adequacy_countries: List[str]
     ) -> List[LegislationRule]:
-        """Create multiple minimal rules with decision capabilities to ensure comprehensive coverage when parsing fails."""
+        """Create multiple minimal rules to ensure comprehensive coverage when parsing fails."""
         minimal_rules = []
         
         roles_to_process = ["controller", "processor", "data_subject"]
+        # CORRECTED: Use advanced inference for data categories
         data_categories_inferred = await self._infer_data_categories_advanced(legislation_text)
         
         for i, role in enumerate(roles_to_process):
             try:
                 rule_data = {
-                    "id": f"minimal_decision_rule_{role}_{datetime.utcnow().timestamp()}_{i}",
-                    "name": f"Legislative Requirement with Decision Framework for {role.title()}",
-                    "description": f"Requirement extracted from legislation for {role} with decision inference capabilities",
+                    "id": f"minimal_rule_{role}_{datetime.utcnow().timestamp()}_{i}",
+                    "name": f"Legislative Requirement for {role.title()}",
+                    "description": f"Requirement extracted from {article_reference} for {role}",
                     "source_article": article_reference,
                     "source_file": source_files.get("level_1", "unknown"),
                     "primary_impacted_role": role,
                     "data_category": data_categories_inferred,
                     "conditions": {
                         "all": [{
-                            "fact": f"{role}_legislative_compliance_required",
+                            "fact": f"{role}_legislative_requirement",
                             "operator": "equal",
                             "value": True,
-                            "description": f"Legislative compliance requirements for {role} are applicable",
+                            "description": f"Legislative requirements for {role} apply",
                             "data_domain": ["data_usage"],
                             "role": role,
-                            "reasoning": f"Minimal condition for {role} based on legislative requirements",
+                            "reasoning": f"Minimal condition for {role} based on {article_reference}",
                             "document_level": document_level,
-                            "chunk_reference": chunk_reference or "none",
-                            "decision_impact": "maybe",
-                            "conditional_requirement": "documentation_completion"
+                            "chunk_reference": chunk_reference or "none"
                         }]
                     },
-                    "event": {
-                        "type": "compliance_required", 
-                        "params": {},
-                        "decision_context": "data_processing"
-                    },
+                    "event": {"type": "compliance_required", "params": {}},
                     "priority": 1,
                     "actions": [],
                     "user_actions": [],
-                    "decision_rules": [],
-                    "enables_decisions": [f"processing decision for {role}"],
+                    "decisions": [],
                     "confidence_score": 0.5,
                     "applicable_countries": applicable_countries,
                     "adequacy_countries": adequacy_countries,
                     "source_documents": source_files,
                     "processing_metadata": {
-                        "extraction_method": "comprehensive_minimal_fallback_with_decisions",
+                        "extraction_method": "comprehensive_minimal_fallback",
                         "chunk_reference": chunk_reference or "none",
                         "role_specific": role
                     }
@@ -1079,9 +820,9 @@ class LegislationAnalyzer:
 
                 rule = LegislationRule.model_validate(rule_data)
                 minimal_rules.append(rule)
-                logger.info(f"Created minimal rule with decision framework for {role}")
+                logger.info(f"Created minimal rule for {role}")
 
             except Exception as e:
-                logger.error(f"Failed to create minimal rule with decisions for {role}: {e}")
+                logger.error(f"Failed to create minimal rule for {role}: {e}")
         
         return minimal_rules

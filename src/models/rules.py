@@ -1,6 +1,6 @@
 """
-Rule models and extraction results with decision-making capabilities.
-COMPLETE VERSION with all original functionality preserved plus decision-making features.
+Rule models and extraction results for the legislation rules converter.
+Enhanced with decision-making capabilities and complete RDF/JSON-LD generation.
 """
 import json
 import os
@@ -11,11 +11,8 @@ from typing import Dict, List, Optional, Any, Tuple
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 import logging
 
-from .enums import DataRole, DataCategory, DocumentLevel, DecisionType, DecisionContext
-from .base_models import (
-    RuleCondition, RuleEvent, RuleAction, UserAction, IntegratedRule, 
-    DecisionOutcome, DecisionRule
-)
+from .enums import DataRole, DataCategory, DocumentLevel
+from .base_models import RuleCondition, RuleEvent, RuleAction, UserAction, IntegratedRule, RuleDecision
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +27,7 @@ except ImportError:
 
 
 class LegislationRule(BaseModel):
-    """Complete rule structure with decision-making capabilities aligned with json-rules-engine format."""
+    """Complete rule structure aligned with json-rules-engine format and enhanced with decision capabilities."""
     model_config = ConfigDict(use_enum_values=True)
 
     id: str = Field(..., description="Unique rule identifier")
@@ -49,10 +46,8 @@ class LegislationRule(BaseModel):
     actions: List[RuleAction] = Field(default_factory=list, description="Actions inferred from legislative text")
     user_actions: List[UserAction] = Field(default_factory=list, description="User-specific actions inferred from legislation")
 
-    # Decision-making capabilities
-    decision_outcome: Optional[DecisionOutcome] = Field(None, description="Primary decision this rule enables")
-    decision_rules: List[DecisionRule] = Field(default_factory=list, description="Specific decision rules derived from this rule")
-    enables_decisions: List[str] = Field(default_factory=list, description="List of decisions this rule enables")
+    # Decisions - New decision-making capabilities
+    decisions: List[RuleDecision] = Field(default_factory=list, description="Decisions that can be made based on this rule")
 
     priority: int = Field(default=1, description="Rule priority (1-10)")
 
@@ -71,7 +66,7 @@ class LegislationRule(BaseModel):
 
     # Metadata
     extracted_at: datetime = Field(default_factory=datetime.utcnow)
-    extraction_method: str = Field(default="llm_analysis_with_decision_inference")
+    extraction_method: str = Field(default="llm_analysis_with_inferred_actions_and_decisions")
     confidence_score: float = Field(..., ge=0.0, le=1.0, description="Extraction confidence")
 
     @field_validator('conditions', mode='after')
@@ -87,6 +82,16 @@ class LegislationRule(BaseModel):
     @field_validator('actions', mode='after')
     @classmethod
     def validate_actions_optional(cls, v):
+        return v if v is not None else []
+
+    @field_validator('user_actions', mode='after')
+    @classmethod
+    def validate_user_actions_optional(cls, v):
+        return v if v is not None else []
+
+    @field_validator('decisions', mode='after')
+    @classmethod
+    def validate_decisions_optional(cls, v):
         return v if v is not None else []
 
     @field_validator('primary_impacted_role', mode='before')
@@ -135,59 +140,6 @@ class LegislationRule(BaseModel):
             return result
         return []
 
-    def get_decision_summary(self) -> Dict[str, Any]:
-        """Get a summary of decision-making capabilities of this rule."""
-        summary = {
-            "has_decision_capability": bool(self.decision_outcome or self.decision_rules),
-            "primary_decision": None,
-            "decision_contexts": [],
-            "conditional_requirements": [],
-            "enabling_actions": []
-        }
-
-        if self.decision_outcome:
-            summary["primary_decision"] = {
-                "decision": self.decision_outcome.decision.value,
-                "context": self.decision_outcome.context.value,
-                "confidence": self.decision_outcome.confidence,
-                "required_actions": [action.value for action in self.decision_outcome.required_actions]
-            }
-
-        for decision_rule in self.decision_rules:
-            summary["decision_contexts"].append(decision_rule.context.value)
-            summary["conditional_requirements"].extend([req.value for req in decision_rule.requirements_for_maybe])
-
-        # Extract enabling actions from rule actions
-        for action in self.actions:
-            if hasattr(action, 'enables_decision') and action.enables_decision:
-                summary["enabling_actions"].append({
-                    "action_type": action.action_type,
-                    "enables": action.enables_decision.decision.value,
-                    "context": action.enables_decision.context.value
-                })
-
-        return summary
-
-    def can_answer_question(self, question: str, context: str = None) -> bool:
-        """Check if this rule can help answer a specific decision question."""
-        question_lower = question.lower()
-        
-        # Check if any decision rules match the question context
-        for decision_rule in self.decision_rules:
-            if context and decision_rule.context.value == context:
-                return True
-            
-            # Check if question keywords match decision scenarios
-            for scenario in decision_rule.applicable_scenarios:
-                if any(keyword in question_lower for keyword in scenario.lower().split()):
-                    return True
-        
-        # Check primary decision outcome
-        if self.decision_outcome and context:
-            return self.decision_outcome.context.value == context
-            
-        return False
-
 
 class ExtractionResult(BaseModel):
     """Complete result of legislation analysis with decision-making capabilities."""
@@ -197,12 +149,7 @@ class ExtractionResult(BaseModel):
     total_rules: int = Field(..., description="Total number of rules extracted")
     total_actions: int = Field(default=0, description="Total number of rule actions extracted")
     total_user_actions: int = Field(default=0, description="Total number of user actions extracted")
-    
-    # Decision-making statistics
-    total_decision_rules: int = Field(default=0, description="Total number of decision rules extracted")
-    total_decisions: int = Field(default=0, description="Total number of decisions enabled")
-    decision_contexts: List[str] = Field(default_factory=list, description="Decision contexts found")
-    
+    total_decisions: int = Field(default=0, description="Total number of decisions extracted")
     processing_time: float = Field(..., description="Processing time in seconds")
     embeddings: Optional[List[List[float]]] = Field(None, description="Rule embeddings")
 
@@ -213,65 +160,8 @@ class ExtractionResult(BaseModel):
     documents_processed: Dict[str, List[str]] = Field(default_factory=dict, description="Documents processed by level")
     chunking_metadata: Dict[str, Any] = Field(default_factory=dict, description="Information about document chunking")
 
-    def get_decision_statistics(self) -> Dict[str, Any]:
-        """Get comprehensive decision-making statistics."""
-        stats = {
-            "total_decision_enabled_rules": 0,
-            "decision_type_breakdown": {"yes": 0, "no": 0, "maybe": 0, "unknown": 0},
-            "decision_context_breakdown": {},
-            "conditional_actions_required": {},
-            "rules_with_decisions": []
-        }
-
-        for rule in self.rules:
-            if rule.decision_outcome or rule.decision_rules:
-                stats["total_decision_enabled_rules"] += 1
-                
-                # Primary decision outcome
-                if rule.decision_outcome:
-                    decision_type = rule.decision_outcome.decision.value
-                    context = rule.decision_outcome.context.value
-                    
-                    stats["decision_type_breakdown"][decision_type] += 1
-                    
-                    if context not in stats["decision_context_breakdown"]:
-                        stats["decision_context_breakdown"][context] = 0
-                    stats["decision_context_breakdown"][context] += 1
-                    
-                    # Track conditional actions
-                    for action in rule.decision_outcome.required_actions:
-                        action_value = action.value
-                        if action_value not in stats["conditional_actions_required"]:
-                            stats["conditional_actions_required"][action_value] = 0
-                        stats["conditional_actions_required"][action_value] += 1
-                
-                # Decision rules
-                for decision_rule in rule.decision_rules:
-                    context = decision_rule.context.value
-                    if context not in stats["decision_context_breakdown"]:
-                        stats["decision_context_breakdown"][context] = 0
-                    stats["decision_context_breakdown"][context] += 1
-                
-                stats["rules_with_decisions"].append({
-                    "rule_id": rule.id,
-                    "rule_name": rule.name,
-                    "decision_summary": rule.get_decision_summary()
-                })
-
-        return stats
-
-    def find_rules_for_decision(self, question: str, context: str = None) -> List[LegislationRule]:
-        """Find rules that can help answer a specific decision question."""
-        relevant_rules = []
-        
-        for rule in self.rules:
-            if rule.can_answer_question(question, context):
-                relevant_rules.append(rule)
-        
-        return relevant_rules
-
     def save_json(self, filepath: str):
-        """Save rules to JSON file with decision information."""
+        """Save rules to JSON file."""
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(
@@ -294,34 +184,6 @@ class ExtractionResult(BaseModel):
                 ensure_ascii=False
             )
 
-    def save_decision_summary(self, filepath: str):
-        """Save a summary of all decision-making capabilities to JSON."""
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        
-        decision_summary = {
-            "extraction_metadata": {
-                "total_rules": self.total_rules,
-                "total_decision_enabled_rules": len([r for r in self.rules if r.decision_outcome or r.decision_rules]),
-                "extraction_time": self.processing_time,
-                "processed_documents": self.documents_processed
-            },
-            "decision_statistics": self.get_decision_statistics(),
-            "decision_capabilities": []
-        }
-
-        for rule in self.rules:
-            if rule.decision_outcome or rule.decision_rules:
-                capability = {
-                    "rule_id": rule.id,
-                    "rule_name": rule.name,
-                    "source_article": rule.source_article,
-                    "decision_summary": rule.get_decision_summary()
-                }
-                decision_summary["decision_capabilities"].append(capability)
-
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(decision_summary, f, indent=2, ensure_ascii=False)
-
     def save_integrated_ttl(self, filepath: str):
         """Save integrated rules in TTL format."""
         if not RDF_AVAILABLE:
@@ -341,24 +203,24 @@ class ExtractionResult(BaseModel):
             json.dump(jsonld_content, f, indent=2, ensure_ascii=False)
 
     def save_csv(self, filepath: str):
-        """Save extraction results to a comprehensive CSV file with decision information and robust error handling - COMPLETE VERSION."""
+        """Save extraction results to a comprehensive CSV file with decision support and robust error handling."""
         try:
+            # Ensure directory exists
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-            print(f"   Attempting to save CSV with decision info to: {filepath}")
+            print(f"   Attempting to save CSV to: {filepath}")
             print(f"   Number of rules to save: {len(self.rules)}")
 
             if not self.rules:
                 print(f"   Warning: No rules to save to CSV")
+                # Create empty CSV with headers
                 with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
                     fieldnames = [
                         'id', 'rule_name', 'rule_description', 'primary_impacted_role', 
                         'secondary_impacted_role', 'data_category', 'applicable_countries', 
                         'adequacy_countries', 'conditions_logic_type', 'count_of_conditions', 
-                        'details_of_conditions', 'rule_actions', 'user_actions',
-                        'has_decision_capability', 'primary_decision', 'decision_contexts',
-                        'conditional_requirements', 'enabling_actions', 
-                        'source_article', 'source_file'
+                        'details_of_conditions', 'rule_actions', 'user_actions', 'decisions',
+                        'decision_outcomes', 'source_article', 'source_file'
                     ]
                     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                     writer.writeheader()
@@ -370,10 +232,8 @@ class ExtractionResult(BaseModel):
                     'id', 'rule_name', 'rule_description', 'primary_impacted_role', 
                     'secondary_impacted_role', 'data_category', 'applicable_countries', 
                     'adequacy_countries', 'conditions_logic_type', 'count_of_conditions', 
-                    'details_of_conditions', 'rule_actions', 'user_actions',
-                    'has_decision_capability', 'primary_decision', 'decision_contexts',
-                    'conditional_requirements', 'enabling_actions', 
-                    'source_article', 'source_file'
+                    'details_of_conditions', 'rule_actions', 'user_actions', 'decisions',
+                    'decision_outcomes', 'source_article', 'source_file'
                 ]
 
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -403,7 +263,7 @@ class ExtractionResult(BaseModel):
                         except Exception as e:
                             data_cats = f"Error processing data categories: {e}"
 
-                        # Process conditions
+                        # Process conditions with comprehensive error handling
                         conditions_logic = ''
                         total_conditions = 0
                         conditions_detail_text = ''
@@ -412,6 +272,7 @@ class ExtractionResult(BaseModel):
                             conditions_logic = '; '.join(rule.conditions.keys())
                             total_conditions = sum(len(conditions) for conditions in rule.conditions.values())
 
+                            # Create detailed conditions description
                             condition_details = []
                             for logic_type, conditions in rule.conditions.items():
                                 for i, condition in enumerate(conditions, 1):
@@ -428,11 +289,7 @@ class ExtractionResult(BaseModel):
                                         except:
                                             domains = 'none'
 
-                                        decision_impact = 'none'
-                                        if hasattr(condition, 'decision_impact') and condition.decision_impact:
-                                            decision_impact = condition.decision_impact.value if hasattr(condition.decision_impact, 'value') else str(condition.decision_impact)
-
-                                        detail = f"[{logic_type.upper()}-{i}] {condition.fact} {operator_val} {condition.value} (Role: {role_val}, Domains: {domains}, Decision: {decision_impact}) - {condition.description}"
+                                        detail = f"[{logic_type.upper()}-{i}] {condition.fact} {operator_val} {condition.value} (Role: {role_val}, Domains: {domains}) - {condition.description}"
                                         condition_details.append(detail)
                                     except Exception as e:
                                         condition_details.append(f"[{logic_type.upper()}-{i}] Error processing condition: {e}")
@@ -441,36 +298,66 @@ class ExtractionResult(BaseModel):
                         except Exception as e:
                             conditions_detail_text = f"Error processing conditions: {e}"
 
-                        # Process actions
-                        rule_actions_text = self._format_actions_for_csv(rule.actions, "rule")
-                        user_actions_text = self._format_actions_for_csv(rule.user_actions, "user")
+                        # Process rule actions with error handling
+                        rule_actions_text = 'None'
+                        try:
+                            rule_action_details = []
+                            for action in rule.actions:
+                                try:
+                                    detail = f"[{action.action_type}] {action.title}: {action.description} (Priority: {action.priority}, Confidence: {action.confidence_score:.2f})"
+                                    rule_action_details.append(detail)
+                                except Exception as e:
+                                    rule_action_details.append(f"Error processing action: {e}")
 
-                        # Process decision information
-                        decision_summary = rule.get_decision_summary()
-                        
-                        has_decision_capability = decision_summary["has_decision_capability"]
-                        
-                        primary_decision_text = 'None'
-                        if decision_summary["primary_decision"]:
-                            pd = decision_summary["primary_decision"]
-                            primary_decision_text = f"{pd['decision']} in {pd['context']} (conf: {pd['confidence']:.2f})"
-                            if pd['required_actions']:
-                                primary_decision_text += f" requires: {', '.join(pd['required_actions'])}"
-                        
-                        decision_contexts_text = '; '.join(decision_summary["decision_contexts"]) if decision_summary["decision_contexts"] else 'None'
-                        
-                        conditional_requirements_text = 'None'
-                        if decision_summary["conditional_requirements"]:
-                            conditional_requirements_text = '; '.join([str(req) for req in decision_summary["conditional_requirements"]])
-                        
-                        enabling_actions_text = 'None'
-                        if decision_summary["enabling_actions"]:
-                            actions_formatted = []
-                            for action in decision_summary["enabling_actions"]:
-                                actions_formatted.append(f"{action['action_type']} -> {action['enables']} in {action['context']}")
-                            enabling_actions_text = ' | '.join(actions_formatted)
+                            rule_actions_text = ' | '.join(rule_action_details) if rule_action_details else 'None'
+                        except Exception as e:
+                            rule_actions_text = f"Error processing rule actions: {e}"
 
-                        # Create row
+                        # Process user actions with error handling
+                        user_actions_text = 'None'
+                        try:
+                            user_action_details = []
+                            for action in rule.user_actions:
+                                try:
+                                    detail = f"[{action.action_type}] {action.title}: {action.description} (Priority: {action.priority}, Confidence: {action.confidence_score:.2f})"
+                                    user_action_details.append(detail)
+                                except Exception as e:
+                                    user_action_details.append(f"Error processing user action: {e}")
+
+                            user_actions_text = ' | '.join(user_action_details) if user_action_details else 'None'
+                        except Exception as e:
+                            user_actions_text = f"Error processing user actions: {e}"
+
+                        # Process decisions with error handling
+                        decisions_text = 'None'
+                        decision_outcomes_text = 'None'
+                        try:
+                            decision_details = []
+                            outcome_details = []
+                            for decision in rule.decisions:
+                                try:
+                                    decision_type_val = decision.decision_type.value if hasattr(decision.decision_type, 'value') else str(decision.decision_type)
+                                    decision_context_val = decision.decision_context.value if hasattr(decision.decision_context, 'value') else str(decision.decision_context)
+                                    outcome_val = decision.outcome.value if hasattr(decision.outcome, 'value') else str(decision.outcome)
+                                    
+                                    detail = f"[{decision_type_val}] {decision.scenario} (Context: {decision_context_val}, Confidence: {decision.confidence_score:.2f})"
+                                    decision_details.append(detail)
+                                    
+                                    outcome_detail = f"{outcome_val}: {decision.rationale}"
+                                    if decision.required_actions_for_maybe:
+                                        outcome_detail += f" | Maybe Actions: {', '.join(decision.required_actions_for_maybe)}"
+                                    outcome_details.append(outcome_detail)
+                                except Exception as e:
+                                    decision_details.append(f"Error processing decision: {e}")
+                                    outcome_details.append(f"Error processing outcome: {e}")
+
+                            decisions_text = ' | '.join(decision_details) if decision_details else 'None'
+                            decision_outcomes_text = ' | '.join(outcome_details) if outcome_details else 'None'
+                        except Exception as e:
+                            decisions_text = f"Error processing decisions: {e}"
+                            decision_outcomes_text = f"Error processing decision outcomes: {e}"
+
+                        # Create row with error handling for each field
                         row = {
                             'id': str(rule.id),
                             'rule_name': str(rule.name),
@@ -485,11 +372,8 @@ class ExtractionResult(BaseModel):
                             'details_of_conditions': conditions_detail_text,
                             'rule_actions': rule_actions_text,
                             'user_actions': user_actions_text,
-                            'has_decision_capability': has_decision_capability,
-                            'primary_decision': primary_decision_text,
-                            'decision_contexts': decision_contexts_text,
-                            'conditional_requirements': conditional_requirements_text,
-                            'enabling_actions': enabling_actions_text,
+                            'decisions': decisions_text,
+                            'decision_outcomes': decision_outcomes_text,
                             'source_article': str(rule.source_article),
                             'source_file': str(rule.source_file)
                         }
@@ -501,41 +385,17 @@ class ExtractionResult(BaseModel):
                         print(f"   Error processing rule {rule.id}: {e}")
                         continue
 
-            print(f"   CSV Rules with Decision Capabilities saved: {filepath}")
+            print(f"   CSV Rules with Dual Actions and Decisions saved: {filepath}")
             print(f"   Successfully saved {saved_count} out of {len(self.rules)} rules to CSV")
 
         except Exception as e:
             logger.error(f"Error saving CSV file: {e}")
             print(f"   Error saving CSV file: {e}")
-
-    def _format_actions_for_csv(self, actions: List, action_type: str) -> str:
-        """Format actions for CSV output with decision information."""
-        if not actions:
-            return 'None'
-        
-        try:
-            action_details = []
-            for action in actions:
-                try:
-                    detail = f"[{action.action_type}] {action.title}: {action.description} (Priority: {action.priority}, Confidence: {action.confidence_score:.2f})"
-                    
-                    # Add decision information if available
-                    if hasattr(action, 'enables_decision') and action.enables_decision:
-                        detail += f" | Enables: {action.enables_decision.decision.value} in {action.enables_decision.context.value}"
-                    
-                    if hasattr(action, 'required_for_decision') and action.required_for_decision:
-                        detail += f" | Required for: {action.required_for_decision.value}"
-                    
-                    action_details.append(detail)
-                except Exception as e:
-                    action_details.append(f"Error processing {action_type} action: {e}")
-
-            return ' | '.join(action_details)
-        except Exception as e:
-            return f"Error processing {action_type} actions: {e}"
+            import traceback
+            traceback.print_exc()
 
     def _generate_turtle_with_rdflib(self) -> str:
-        """Generate Turtle RDF representation with complete rule information, decision trees, and decision-making capabilities - COMPLETE VERSION."""
+        """Generate Turtle RDF representation with complete rule information, decision trees, and decisions."""
         if not RDF_AVAILABLE:
             return "# Error: rdflib not available for TTL generation"
 
@@ -550,7 +410,6 @@ class ExtractionResult(BaseModel):
         ODRL = Namespace(Config.ODRL_NAMESPACE)
         ODRE = Namespace("https://w3id.org/def/odre#")
         RULES = Namespace("https://w3id.org/legislation-rules#")
-        DECISION = Namespace("https://w3id.org/decision-framework#")
 
         # Bind namespaces
         g.bind("dpv", DPV)
@@ -559,7 +418,6 @@ class ExtractionResult(BaseModel):
         g.bind("odrl", ODRL)
         g.bind("odre", ODRE)
         g.bind("rules", RULES)
-        g.bind("decision", DECISION)
         g.bind("rdf", RDF)
         g.bind("rdfs", RDFS)
         g.bind("xsd", XSD)
@@ -577,29 +435,6 @@ class ExtractionResult(BaseModel):
             g.add((rule_uri, RULES.sourceFile, Literal(rule.source_file)))
             g.add((rule_uri, RULES.priority, Literal(rule.priority, datatype=XSD.integer)))
             g.add((rule_uri, RULES.confidenceScore, Literal(rule.confidence_score, datatype=XSD.float)))
-
-            # Decision capabilities
-            if rule.decision_outcome or rule.decision_rules:
-                g.add((rule_uri, RDF.type, DECISION.DecisionEnabledRule))
-                
-                if rule.decision_outcome:
-                    decision_uri = URIRef(f"urn:rule:{rule_id_encoded}:decision")
-                    g.add((rule_uri, DECISION.hasDecisionOutcome, decision_uri))
-                    g.add((decision_uri, RDF.type, DECISION.DecisionOutcome))
-                    g.add((decision_uri, DECISION.decision, Literal(rule.decision_outcome.decision.value)))
-                    g.add((decision_uri, DECISION.context, Literal(rule.decision_outcome.context.value)))
-                    g.add((decision_uri, DECISION.confidence, Literal(rule.decision_outcome.confidence, datatype=XSD.float)))
-                    g.add((decision_uri, DECISION.reasoning, Literal(rule.decision_outcome.decision_reasoning)))
-                    g.add((decision_uri, DECISION.legislativeBasis, Literal(rule.decision_outcome.legislative_basis)))
-                    
-                    # Required actions for conditional decisions
-                    for action in rule.decision_outcome.required_actions:
-                        action_value = action.value if hasattr(action, 'value') else str(action)
-                        g.add((decision_uri, DECISION.requiresAction, Literal(action_value)))
-                    
-                    # Required conditions
-                    for condition in rule.decision_outcome.required_conditions:
-                        g.add((decision_uri, DECISION.requiresCondition, Literal(condition)))
 
             # Roles
             if rule.primary_impacted_role:
@@ -658,15 +493,6 @@ class ExtractionResult(BaseModel):
                     if condition.chunk_reference:
                         g.add((condition_uri, RULES.chunkReference, Literal(condition.chunk_reference)))
 
-                    # Decision impact
-                    if hasattr(condition, 'decision_impact') and condition.decision_impact:
-                        decision_impact_val = condition.decision_impact.value if hasattr(condition.decision_impact, 'value') else str(condition.decision_impact)
-                        g.add((condition_uri, DECISION.impactsDecision, Literal(decision_impact_val)))
-
-                    if hasattr(condition, 'conditional_requirement') and condition.conditional_requirement:
-                        req_val = condition.conditional_requirement.value if hasattr(condition.conditional_requirement, 'value') else str(condition.conditional_requirement)
-                        g.add((condition_uri, DECISION.conditionalRequirement, Literal(req_val)))
-
             # Rule Actions
             for i, action in enumerate(rule.actions):
                 action_uri = URIRef(f"urn:rule:{rule_id_encoded}:action:{i}")
@@ -693,19 +519,6 @@ class ExtractionResult(BaseModel):
 
                 if action.timeline:
                     g.add((action_uri, RULES.timeline, Literal(action.timeline)))
-
-                # Decision capabilities of actions
-                if hasattr(action, 'enables_decision') and action.enables_decision:
-                    decision_uri = URIRef(f"urn:rule:{rule_id_encoded}:action:{i}:decision")
-                    g.add((action_uri, DECISION.enablesDecision, decision_uri))
-                    g.add((decision_uri, RDF.type, DECISION.ActionDecisionOutcome))
-                    g.add((decision_uri, DECISION.decision, Literal(action.enables_decision.decision.value)))
-                    g.add((decision_uri, DECISION.context, Literal(action.enables_decision.context.value)))
-                    g.add((decision_uri, DECISION.reasoning, Literal(action.enables_decision.decision_reasoning)))
-
-                if hasattr(action, 'required_for_decision') and action.required_for_decision:
-                    req_decision_val = action.required_for_decision.value if hasattr(action.required_for_decision, 'value') else str(action.required_for_decision)
-                    g.add((action_uri, DECISION.requiredForDecision, Literal(req_decision_val)))
 
             # User Actions
             for i, action in enumerate(rule.user_actions):
@@ -738,60 +551,55 @@ class ExtractionResult(BaseModel):
                 if action.timeline:
                     g.add((action_uri, RULES.timeline, Literal(action.timeline)))
 
-                # Decision capabilities of user actions
-                if hasattr(action, 'enables_decision') and action.enables_decision:
-                    decision_uri = URIRef(f"urn:rule:{rule_id_encoded}:userAction:{i}:decision")
-                    g.add((action_uri, DECISION.enablesDecision, decision_uri))
-                    g.add((decision_uri, RDF.type, DECISION.UserActionDecisionOutcome))
-                    g.add((decision_uri, DECISION.decision, Literal(action.enables_decision.decision.value)))
-                    g.add((decision_uri, DECISION.context, Literal(action.enables_decision.context.value)))
-                    g.add((decision_uri, DECISION.reasoning, Literal(action.enables_decision.decision_reasoning)))
+            # Decisions - New decision support
+            for i, decision in enumerate(rule.decisions):
+                decision_uri = URIRef(f"urn:rule:{rule_id_encoded}:decision:{i}")
+                g.add((rule_uri, RULES.hasDecision, decision_uri))
+                g.add((decision_uri, RDF.type, RULES.RuleDecision))
+                
+                decision_type_val = decision.decision_type.value if hasattr(decision.decision_type, 'value') else str(decision.decision_type)
+                decision_context_val = decision.decision_context.value if hasattr(decision.decision_context, 'value') else str(decision.decision_context)
+                outcome_val = decision.outcome.value if hasattr(decision.outcome, 'value') else str(decision.outcome)
+                
+                g.add((decision_uri, RULES.decisionType, Literal(decision_type_val)))
+                g.add((decision_uri, RULES.decisionContext, Literal(decision_context_val)))
+                g.add((decision_uri, RULES.outcome, Literal(outcome_val)))
+                g.add((decision_uri, RULES.scenario, Literal(decision.scenario)))
+                g.add((decision_uri, RULES.rationale, Literal(decision.rationale)))
+                g.add((decision_uri, RULES.confidenceScore, Literal(decision.confidence_score, datatype=XSD.float)))
+                g.add((decision_uri, RULES.crossBorder, Literal(decision.cross_border, datatype=XSD.boolean)))
 
-                if hasattr(action, 'decision_impact') and action.decision_impact:
-                    g.add((action_uri, DECISION.decisionImpact, Literal(action.decision_impact)))
+                # Decision conditions
+                for condition in decision.conditions_for_yes:
+                    g.add((decision_uri, RULES.conditionForYes, Literal(condition)))
+                for condition in decision.conditions_for_no:
+                    g.add((decision_uri, RULES.conditionForNo, Literal(condition)))
+                for condition in decision.conditions_for_maybe:
+                    g.add((decision_uri, RULES.conditionForMaybe, Literal(condition)))
 
-            # Decision Rules
-            for i, decision_rule in enumerate(rule.decision_rules):
-                decision_rule_uri = URIRef(f"urn:rule:{rule_id_encoded}:decisionRule:{i}")
-                g.add((rule_uri, DECISION.hasDecisionRule, decision_rule_uri))
-                g.add((decision_rule_uri, RDF.type, DECISION.DecisionRule))
-                g.add((decision_rule_uri, DECISION.question, Literal(decision_rule.question)))
-                g.add((decision_rule_uri, DECISION.context, Literal(decision_rule.context.value)))
-                g.add((decision_rule_uri, DECISION.defaultDecision, Literal(decision_rule.default_decision.value)))
-                g.add((decision_rule_uri, DECISION.confidenceScore, Literal(decision_rule.confidence_score, datatype=XSD.float)))
+                # Required actions
+                for action in decision.required_actions_for_yes:
+                    g.add((decision_uri, RULES.requiredActionForYes, Literal(action)))
+                for action in decision.required_actions_for_maybe:
+                    g.add((decision_uri, RULES.requiredActionForMaybe, Literal(action)))
 
-                # Requirements for different decision types
-                for req in decision_rule.requirements_for_yes:
-                    g.add((decision_rule_uri, DECISION.requirementForYes, Literal(req)))
+                # Decision factors
+                for factor in decision.decision_factors:
+                    g.add((decision_uri, RULES.decisionFactor, Literal(factor)))
 
-                for req in decision_rule.requirements_for_maybe:
-                    req_val = req.value if hasattr(req, 'value') else str(req)
-                    g.add((decision_rule_uri, DECISION.requirementForMaybe, Literal(req_val)))
+                # Applicable contexts
+                for category in decision.applicable_data_categories:
+                    g.add((decision_uri, RULES.applicableDataCategory, Literal(category)))
+                for role in decision.applicable_roles:
+                    g.add((decision_uri, RULES.applicableRole, Literal(role)))
 
-                for reason in decision_rule.reasons_for_no:
-                    g.add((decision_rule_uri, DECISION.reasonForNo, Literal(reason)))
-
-                for scenario in decision_rule.applicable_scenarios:
-                    g.add((decision_rule_uri, DECISION.applicableScenario, Literal(scenario)))
-
-                # Conditional decisions
-                for j, conditional in enumerate(decision_rule.conditional_decisions):
-                    conditional_uri = URIRef(f"urn:rule:{rule_id_encoded}:decisionRule:{i}:conditional:{j}")
-                    g.add((decision_rule_uri, DECISION.hasConditionalDecision, conditional_uri))
-                    g.add((conditional_uri, RDF.type, DECISION.ConditionalDecision))
-                    
-                    if "decision" in conditional:
-                        g.add((conditional_uri, DECISION.conditionalDecision, Literal(conditional["decision"])))
-                    
-                    if "conditions" in conditional:
-                        for condition in conditional["conditions"]:
-                            g.add((conditional_uri, DECISION.conditionalRequirement, Literal(condition)))
+                if decision.source_jurisdiction:
+                    g.add((decision_uri, RULES.sourceJurisdiction, Literal(decision.source_jurisdiction)))
+                if decision.target_jurisdiction:
+                    g.add((decision_uri, RULES.targetJurisdiction, Literal(decision.target_jurisdiction)))
 
             # Event information
             g.add((rule_uri, RULES.eventType, Literal(rule.event.type)))
-            if hasattr(rule.event, 'decision_context') and rule.event.decision_context:
-                context_val = rule.event.decision_context.value if hasattr(rule.event.decision_context, 'value') else str(rule.event.decision_context)
-                g.add((rule_uri, DECISION.eventContext, Literal(context_val)))
 
             # Metadata
             g.add((rule_uri, RULES.extractedAt, Literal(rule.extracted_at.isoformat(), datatype=XSD.dateTime)))
@@ -809,9 +617,7 @@ class ExtractionResult(BaseModel):
             g.add((rule_uri, ODRE.enforcement_mode, Literal(integrated_rule.odre_enforcement_mode)))
             g.add((rule_uri, ODRE.action_inference, Literal(integrated_rule.odre_action_inference, datatype=XSD.boolean)))
             g.add((rule_uri, ODRE.user_action_inference, Literal(integrated_rule.odre_user_action_inference, datatype=XSD.boolean)))
-            
-            if hasattr(integrated_rule, 'odre_decision_inference'):
-                g.add((rule_uri, ODRE.decision_inference, Literal(integrated_rule.odre_decision_inference, datatype=XSD.boolean)))
+            g.add((rule_uri, ODRE.decision_inference, Literal(integrated_rule.odre_decision_inference, datatype=XSD.boolean)))
 
             # DPV Properties
             for processing in integrated_rule.dpv_hasProcessing:
@@ -831,10 +637,12 @@ class ExtractionResult(BaseModel):
             for action in integrated_rule.dpv_hasUserAction:
                 g.add((rule_uri, DPV_ACTION.hasUserAction, URIRef(action)))
 
-            # Decision actions
-            if hasattr(integrated_rule, 'dpv_hasDecisionAction'):
-                for action in integrated_rule.dpv_hasDecisionAction:
-                    g.add((rule_uri, DPV_ACTION.hasDecisionAction, URIRef(action)))
+            # Decisions
+            for decision in integrated_rule.dpv_hasDecision:
+                g.add((rule_uri, DPV_ACTION.hasDecision, URIRef(decision)))
+
+            for outcome in integrated_rule.dpv_hasDecisionOutcome:
+                g.add((rule_uri, DPV_ACTION.hasDecisionOutcome, URIRef(outcome)))
 
             if integrated_rule.dpv_hasDataController:
                 g.add((rule_uri, DPV.hasDataController, URIRef(integrated_rule.dpv_hasDataController)))
@@ -845,15 +653,6 @@ class ExtractionResult(BaseModel):
             for location in integrated_rule.dpv_hasLocation:
                 g.add((rule_uri, DPV.hasLocation, URIRef(location)))
 
-            # Decision capabilities in integrated rule
-            if hasattr(integrated_rule, 'primary_decision') and integrated_rule.primary_decision:
-                primary_decision_uri = URIRef(f"urn:rule:{rule_id_encoded}:primaryDecision")
-                g.add((rule_uri, DECISION.hasPrimaryDecision, primary_decision_uri))
-                g.add((primary_decision_uri, RDF.type, DECISION.PrimaryDecisionOutcome))
-                g.add((primary_decision_uri, DECISION.decision, Literal(integrated_rule.primary_decision.decision.value)))
-                g.add((primary_decision_uri, DECISION.context, Literal(integrated_rule.primary_decision.context.value)))
-                g.add((primary_decision_uri, DECISION.confidence, Literal(integrated_rule.primary_decision.confidence, datatype=XSD.float)))
-
         # Serialize to Turtle format
         turtle_output = g.serialize(format='turtle')
         if isinstance(turtle_output, bytes):
@@ -861,7 +660,7 @@ class ExtractionResult(BaseModel):
         return turtle_output
 
     def _generate_jsonld(self) -> Dict[str, Any]:
-        """Generate JSON-LD representation with complete rule information, decision trees, and decision-making capabilities - COMPLETE VERSION."""
+        """Generate JSON-LD representation with complete rule information, decision trees, and decisions."""
         from ..config import Config
         
         context = {
@@ -872,7 +671,6 @@ class ExtractionResult(BaseModel):
                 "odrl": Config.ODRL_NAMESPACE,
                 "odre": "https://w3id.org/def/odre#",
                 "rules": "https://w3id.org/legislation-rules#",
-                "decision": "https://w3id.org/decision-framework#",
                 "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
                 "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
                 "xsd": "http://www.w3.org/2001/XMLSchema#"
@@ -881,15 +679,11 @@ class ExtractionResult(BaseModel):
 
         graph = []
 
-        # Process all original rules with complete information
+        # Process all original rules with complete information including decisions
         for rule in self.rules:
-            rule_types = ["rules:LegislationRule"]
-            if rule.decision_outcome or rule.decision_rules:
-                rule_types.append("decision:DecisionEnabledRule")
-
             rule_jsonld = {
                 "@id": f"urn:rule:{rule.id}",
-                "@type": rule_types,
+                "@type": "rules:LegislationRule",
                 "rdfs:label": rule.name,
                 "rules:description": rule.description,
                 "rules:sourceArticle": rule.source_article,
@@ -903,29 +697,6 @@ class ExtractionResult(BaseModel):
                     "@type": "xsd:float"
                 }
             }
-
-            # Decision capabilities
-            if rule.decision_outcome:
-                rule_jsonld["decision:hasDecisionOutcome"] = {
-                    "@type": "decision:DecisionOutcome",
-                    "decision:decision": rule.decision_outcome.decision.value,
-                    "decision:context": rule.decision_outcome.context.value,
-                    "decision:confidence": {
-                        "@value": rule.decision_outcome.confidence,
-                        "@type": "xsd:float"
-                    },
-                    "decision:reasoning": rule.decision_outcome.decision_reasoning,
-                    "decision:legislativeBasis": rule.decision_outcome.legislative_basis
-                }
-
-                # Required actions
-                if rule.decision_outcome.required_actions:
-                    required_actions = [action.value for action in rule.decision_outcome.required_actions]
-                    rule_jsonld["decision:hasDecisionOutcome"]["decision:requiresAction"] = required_actions
-
-                # Required conditions
-                if rule.decision_outcome.required_conditions:
-                    rule_jsonld["decision:hasDecisionOutcome"]["decision:requiresCondition"] = rule.decision_outcome.required_conditions
 
             # Roles
             if rule.primary_impacted_role:
@@ -981,15 +752,6 @@ class ExtractionResult(BaseModel):
                     if condition.chunk_reference:
                         condition_obj["rules:chunkReference"] = condition.chunk_reference
 
-                    # Decision impact
-                    if hasattr(condition, 'decision_impact') and condition.decision_impact:
-                        decision_impact_val = condition.decision_impact.value if hasattr(condition.decision_impact, 'value') else str(condition.decision_impact)
-                        condition_obj["decision:impactsDecision"] = decision_impact_val
-
-                    if hasattr(condition, 'conditional_requirement') and condition.conditional_requirement:
-                        req_val = condition.conditional_requirement.value if hasattr(condition.conditional_requirement, 'value') else str(condition.conditional_requirement)
-                        condition_obj["decision:conditionalRequirement"] = req_val
-
                     # Data domains
                     domains = []
                     for domain in condition.data_domain:
@@ -1034,19 +796,6 @@ class ExtractionResult(BaseModel):
                 if action.timeline:
                     action_obj["rules:timeline"] = action.timeline
 
-                # Decision capabilities of actions
-                if hasattr(action, 'enables_decision') and action.enables_decision:
-                    action_obj["decision:enablesDecision"] = {
-                        "@type": "decision:ActionDecisionOutcome",
-                        "decision:decision": action.enables_decision.decision.value,
-                        "decision:context": action.enables_decision.context.value,
-                        "decision:reasoning": action.enables_decision.decision_reasoning
-                    }
-
-                if hasattr(action, 'required_for_decision') and action.required_for_decision:
-                    req_decision_val = action.required_for_decision.value if hasattr(action.required_for_decision, 'value') else str(action.required_for_decision)
-                    action_obj["decision:requiredForDecision"] = req_decision_val
-
                 rule_actions.append(action_obj)
 
             if rule_actions:
@@ -1084,73 +833,64 @@ class ExtractionResult(BaseModel):
                 if action.timeline:
                     action_obj["rules:timeline"] = action.timeline
 
-                # Decision capabilities of user actions
-                if hasattr(action, 'enables_decision') and action.enables_decision:
-                    action_obj["decision:enablesDecision"] = {
-                        "@type": "decision:UserActionDecisionOutcome",
-                        "decision:decision": action.enables_decision.decision.value,
-                        "decision:context": action.enables_decision.context.value,
-                        "decision:reasoning": action.enables_decision.decision_reasoning
-                    }
-
-                if hasattr(action, 'decision_impact') and action.decision_impact:
-                    action_obj["decision:decisionImpact"] = action.decision_impact
-
                 user_actions.append(action_obj)
 
             if user_actions:
                 rule_jsonld["rules:hasUserAction"] = user_actions
 
-            # Decision Rules
-            decision_rules = []
-            for decision_rule in rule.decision_rules:
-                decision_rule_obj = {
-                    "@type": "decision:DecisionRule",
-                    "decision:question": decision_rule.question,
-                    "decision:context": decision_rule.context.value,
-                    "decision:defaultDecision": decision_rule.default_decision.value,
-                    "decision:confidenceScore": {
-                        "@value": decision_rule.confidence_score,
+            # Decisions - New decision support
+            decisions = []
+            for decision in rule.decisions:
+                decision_type_val = decision.decision_type.value if hasattr(decision.decision_type, 'value') else str(decision.decision_type)
+                decision_context_val = decision.decision_context.value if hasattr(decision.decision_context, 'value') else str(decision.decision_context)
+                outcome_val = decision.outcome.value if hasattr(decision.outcome, 'value') else str(decision.outcome)
+                
+                decision_obj = {
+                    "@type": "rules:RuleDecision",
+                    "rules:decisionType": decision_type_val,
+                    "rules:decisionContext": decision_context_val,
+                    "rules:outcome": outcome_val,
+                    "rules:scenario": decision.scenario,
+                    "rules:rationale": decision.rationale,
+                    "rules:confidenceScore": {
+                        "@value": decision.confidence_score,
                         "@type": "xsd:float"
-                    }
+                    },
+                    "rules:crossBorder": decision.cross_border
                 }
 
-                if decision_rule.requirements_for_yes:
-                    decision_rule_obj["decision:requirementForYes"] = decision_rule.requirements_for_yes
+                if decision.conditions_for_yes:
+                    decision_obj["rules:conditionForYes"] = decision.conditions_for_yes
+                if decision.conditions_for_no:
+                    decision_obj["rules:conditionForNo"] = decision.conditions_for_no
+                if decision.conditions_for_maybe:
+                    decision_obj["rules:conditionForMaybe"] = decision.conditions_for_maybe
 
-                if decision_rule.requirements_for_maybe:
-                    maybe_reqs = [req.value for req in decision_rule.requirements_for_maybe]
-                    decision_rule_obj["decision:requirementForMaybe"] = maybe_reqs
+                if decision.required_actions_for_yes:
+                    decision_obj["rules:requiredActionForYes"] = decision.required_actions_for_yes
+                if decision.required_actions_for_maybe:
+                    decision_obj["rules:requiredActionForMaybe"] = decision.required_actions_for_maybe
 
-                if decision_rule.reasons_for_no:
-                    decision_rule_obj["decision:reasonForNo"] = decision_rule.reasons_for_no
+                if decision.decision_factors:
+                    decision_obj["rules:decisionFactor"] = decision.decision_factors
 
-                if decision_rule.applicable_scenarios:
-                    decision_rule_obj["decision:applicableScenario"] = decision_rule.applicable_scenarios
+                if decision.applicable_data_categories:
+                    decision_obj["rules:applicableDataCategory"] = decision.applicable_data_categories
+                if decision.applicable_roles:
+                    decision_obj["rules:applicableRole"] = decision.applicable_roles
 
-                if decision_rule.conditional_decisions:
-                    conditional_decisions = []
-                    for conditional in decision_rule.conditional_decisions:
-                        conditional_obj = {
-                            "@type": "decision:ConditionalDecision"
-                        }
-                        if "decision" in conditional:
-                            conditional_obj["decision:conditionalDecision"] = conditional["decision"]
-                        if "conditions" in conditional:
-                            conditional_obj["decision:conditionalRequirement"] = conditional["conditions"]
-                        conditional_decisions.append(conditional_obj)
-                    decision_rule_obj["decision:hasConditionalDecision"] = conditional_decisions
+                if decision.source_jurisdiction:
+                    decision_obj["rules:sourceJurisdiction"] = decision.source_jurisdiction
+                if decision.target_jurisdiction:
+                    decision_obj["rules:targetJurisdiction"] = decision.target_jurisdiction
 
-                decision_rules.append(decision_rule_obj)
+                decisions.append(decision_obj)
 
-            if decision_rules:
-                rule_jsonld["decision:hasDecisionRule"] = decision_rules
+            if decisions:
+                rule_jsonld["rules:hasDecision"] = decisions
 
             # Event information
             rule_jsonld["rules:eventType"] = rule.event.type
-            if hasattr(rule.event, 'decision_context') and rule.event.decision_context:
-                context_val = rule.event.decision_context.value if hasattr(rule.event.decision_context, 'value') else str(rule.event.decision_context)
-                rule_jsonld["decision:eventContext"] = context_val
 
             # Metadata
             rule_jsonld["rules:extractedAt"] = {
@@ -1166,11 +906,9 @@ class ExtractionResult(BaseModel):
             # Find the corresponding original rule
             original_rule_id = integrated_rule.id.replace("integrated:", "")
 
-            integrated_types = ["odre:EnforceablePolicy", "dpv:ProcessingActivity"]
-
             integrated_jsonld = {
                 "@id": f"urn:rule:{integrated_rule.id}",
-                "@type": integrated_types,
+                "@type": ["odre:EnforceablePolicy", "dpv:ProcessingActivity"],
                 "rdfs:label": integrated_rule.source_article,
 
                 # ODRE Properties
@@ -1178,6 +916,7 @@ class ExtractionResult(BaseModel):
                 "odre:enforcement_mode": integrated_rule.odre_enforcement_mode,
                 "odre:action_inference": integrated_rule.odre_action_inference,
                 "odre:user_action_inference": integrated_rule.odre_user_action_inference,
+                "odre:decision_inference": integrated_rule.odre_decision_inference,
 
                 # DPV Properties
                 "dpv:hasProcessing": [{"@id": uri} for uri in integrated_rule.dpv_hasProcessing],
@@ -1186,6 +925,8 @@ class ExtractionResult(BaseModel):
                 "dpv:hasLocation": [{"@id": uri} for uri in integrated_rule.dpv_hasLocation],
                 "dpv-action:hasRuleAction": [{"@id": uri} for uri in integrated_rule.dpv_hasRuleAction],
                 "dpv-action:hasUserAction": [{"@id": uri} for uri in integrated_rule.dpv_hasUserAction],
+                "dpv-action:hasDecision": [{"@id": uri} for uri in integrated_rule.dpv_hasDecision],
+                "dpv-action:hasDecisionOutcome": [{"@id": uri} for uri in integrated_rule.dpv_hasDecisionOutcome],
                 "dpv-action:hasDocumentLevel": integrated_rule.source_document_levels,
                 "dpv-action:hasChunkReference": integrated_rule.chunk_references,
 
@@ -1226,26 +967,6 @@ class ExtractionResult(BaseModel):
                 integrated_jsonld["dpv:hasDataController"] = {"@id": integrated_rule.dpv_hasDataController}
             if integrated_rule.dpv_hasDataProcessor:
                 integrated_jsonld["dpv:hasDataProcessor"] = {"@id": integrated_rule.dpv_hasDataProcessor}
-
-            # Decision actions
-            if hasattr(integrated_rule, 'dpv_hasDecisionAction'):
-                integrated_jsonld["dpv-action:hasDecisionAction"] = [{"@id": uri} for uri in integrated_rule.dpv_hasDecisionAction]
-
-            # Decision inference capability
-            if hasattr(integrated_rule, 'odre_decision_inference'):
-                integrated_jsonld["odre:decision_inference"] = integrated_rule.odre_decision_inference
-
-            # Primary decision
-            if hasattr(integrated_rule, 'primary_decision') and integrated_rule.primary_decision:
-                integrated_jsonld["decision:hasPrimaryDecision"] = {
-                    "@type": "decision:PrimaryDecisionOutcome",
-                    "decision:decision": integrated_rule.primary_decision.decision.value,
-                    "decision:context": integrated_rule.primary_decision.context.value,
-                    "decision:confidence": {
-                        "@value": integrated_rule.primary_decision.confidence,
-                        "@type": "xsd:float"
-                    }
-                }
 
             graph.append(integrated_jsonld)
 

@@ -1,5 +1,6 @@
 """
-LangChain tools for rule extraction, action inference, and decision-making capabilities.
+LangChain tools for rule extraction, action inference, and decision-making.
+Enhanced with decision inference capabilities.
 """
 from openai import OpenAI
 from langchain_core.tools import tool
@@ -8,11 +9,11 @@ from ..config import Config
 
 
 @tool
-def extract_rule_conditions_with_decisions(legislation_text: str, focus_area: str) -> str:
-    """Extract specific rule conditions from legislation text with decision impact analysis."""
+def extract_rule_conditions(legislation_text: str, focus_area: str) -> str:
+    """Extract specific rule conditions from legislation text."""
 
     prompt = f"""
-    Extract rule conditions from the following legislation text, focusing on {focus_area}, including decision-making implications.
+    Extract rule conditions from the following legislation text, focusing on {focus_area}.
 
     Return conditions in json-rules-engine format based on explicit requirements in the text.
 
@@ -23,18 +24,9 @@ def extract_rule_conditions_with_decisions(legislation_text: str, focus_area: st
     - Comparison operators based on legal language
     - Values to compare against as stated in the text
     - Data domains and roles mentioned
-    - Decision impact of each condition (does it enable yes/no/maybe decisions?)
-    - Actions required when conditions are met or not met
 
-    For each condition, also determine:
-    - decision_impact: "yes", "no", "maybe", or "unknown" based on legislative language
-    - conditional_requirement: specific action required if condition triggers a "maybe" decision
-    - Examples:
-      * "if data is masked" -> decision_impact: "maybe", conditional_requirement: "data_masking"  
-      * "consent must be obtained" -> decision_impact: "maybe", conditional_requirement: "consent_obtainment"
-      * "is prohibited" -> decision_impact: "no", conditional_requirement: null
-
-    Return valid JSON only. Base conditions on explicit legislative language and their decision implications.
+    Return valid JSON only. Base conditions on explicit legislative language.
+    Use simple, clear English without referencing guidance documents or document levels.
     """
 
     try:
@@ -53,32 +45,22 @@ def extract_rule_conditions_with_decisions(legislation_text: str, focus_area: st
 
 
 @tool
-def analyze_data_domains_with_decision_context(legislation_text: str) -> str:
-    """Analyze and identify relevant data domains in legislation with decision contexts."""
+def analyze_data_domains(legislation_text: str) -> str:
+    """Analyze and identify relevant data domains in legislation."""
 
     prompt = f"""
-    Analyze the following legislation text and identify which data domains are mentioned along with their decision contexts:
-    - data_transfer: Moving data between locations/entities
-    - data_usage: Using data for specific purposes
-    - data_storage: Storing data in specific ways/locations
-    - data_collection: Collecting data from individuals
-    - data_deletion: Deleting or erasing data
+    Analyze the following legislation text and identify which data domains are mentioned:
+    - data_transfer
+    - data_usage
+    - data_storage
+    - data_collection
+    - data_deletion
 
     Text: {legislation_text}
 
-    For each identified domain, also determine:
-    - Decision scenarios it relates to (e.g., "Can data be transferred?", "Is processing allowed?")
-    - Permission level: "permitted", "prohibited", "conditional" based on legislative language
-    - Required actions for conditional scenarios (data masking, consent, etc.)
-
-    Return a JSON object mapping each identified domain to:
-    - relevance: how relevant it is to the text
-    - decision_context: what decisions it relates to
-    - permission_level: permitted/prohibited/conditional
-    - required_actions: actions needed for conditional permissions
-    - supporting_text: specific text that indicates the domain
-
+    Return a JSON object mapping each identified domain to its relevance and the specific text that indicates it.
     Include only domains that are mentioned in the legislation text.
+    Use simple, clear English without referencing guidance documents or document levels.
     """
 
     try:
@@ -97,33 +79,21 @@ def analyze_data_domains_with_decision_context(legislation_text: str) -> str:
 
 
 @tool
-def identify_roles_responsibilities_with_decision_authority(legislation_text: str) -> str:
-    """Identify roles and responsibilities in legislation with decision-making authority."""
+def identify_roles_responsibilities(legislation_text: str) -> str:
+    """Identify roles and responsibilities in legislation."""
 
     prompt = f"""
-    Identify the roles and responsibilities mentioned in this legislation, including their decision-making authority:
-    - controller: Data controller with decision authority
-    - processor: Data processor with limited decision authority  
-    - joint_controller: Joint controllers with shared decision authority
-    - data_subject: Data subjects with rights-based decision authority
+    Identify the roles and responsibilities mentioned in this legislation:
+    - controller
+    - processor 
+    - joint_controller
+    - data_subject
 
     Text: {legislation_text}
 
-    For each role mentioned, identify:
-    - Specific obligations and responsibilities as stated in the text
-    - Decision-making authority (what decisions can they make?)
-    - Conditions under which they can make decisions
-    - Actions they must take for compliance
-    - Actions they can require from others
-
-    Return a JSON object with role mappings that includes:
-    - obligations: list of specific obligations
-    - decision_authority: what decisions they can make
-    - required_actions: actions they must perform
-    - conditional_permissions: actions they can do under certain conditions
-    - prohibited_actions: actions they cannot do
-
-    Base analysis only on what is explicitly stated in the legislation.
+    For each role mentioned, identify their specific obligations and responsibilities as stated in the text.
+    Return a JSON object with role mappings based on what is stated.
+    Use simple, clear English without referencing guidance documents or document levels.
     """
 
     try:
@@ -142,69 +112,11 @@ def identify_roles_responsibilities_with_decision_authority(legislation_text: st
 
 
 @tool
-def infer_decision_enabling_actions(legislation_text: str, decision_context: str, conditional_scenarios: str) -> str:
-    """Infer actions that enable or change decision outcomes in legislation."""
+def infer_data_processing_actions(legislation_text: str, data_categories: str, processing_context: str) -> str:
+    """Infer specific data processing actions from legislation text."""
 
     prompt = f"""
-    Based on the legislation text and decision context, identify specific actions that enable decision outcomes.
-
-    Legislation Text: {legislation_text}
-    Decision Context: {decision_context}
-    Conditional Scenarios: {conditional_scenarios}
-
-    Focus on actions that:
-    1. Change a "no" decision to "yes" (enabling actions)
-    2. Change a "maybe" decision to "yes" (fulfilling conditions)
-    3. Are required for conditional permissions
-    4. Enable compliance with legislative requirements
-
-    Look for decision-enabling actions like:
-    - data_masking: Actions that mask, pseudonymize, or anonymize data
-    - data_encryption: Actions that encrypt data in transit or at rest  
-    - consent_obtainment: Actions to obtain valid, informed consent
-    - consent_verification: Actions to verify existing consent
-    - adequacy_verification: Actions to verify adequacy decisions
-    - safeguards_implementation: Actions to implement appropriate safeguards
-    - documentation_completion: Actions to complete required documentation
-    - impact_assessment: Actions to conduct privacy/data protection impact assessments
-    - approval_obtainment: Actions to obtain regulatory or supervisory approvals
-    - notification_completion: Actions to complete required notifications
-
-    For each decision-enabling action, provide:
-    - action_type: Type of enabling action from the list above
-    - title: Clear action title in simple English
-    - description: What must be done to enable the decision
-    - decision_impact: How this action changes the decision (no->yes, maybe->yes, etc.)
-    - required_for_context: Which decision context requires this action
-    - legislative_requirement: Exact text requiring this action
-    - verification_method: How to confirm the action was completed
-    - derived_from_text: Exact legislative text requiring this enabling action
-
-    Return valid JSON array. Only include actions explicitly required by the legislation.
-    If no decision-enabling actions can be inferred, return empty array.
-    """
-
-    try:
-        client = OpenAI(
-            api_key=Config.API_KEY,
-            base_url=Config.BASE_URL
-        )
-
-        response = client.chat.completions.create(
-            model=Config.CHAT_MODEL,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"Error inferring decision-enabling actions: {str(e)}"
-
-
-@tool
-def infer_data_processing_actions_with_decisions(legislation_text: str, data_categories: str, processing_context: str) -> str:
-    """Infer specific data processing actions from legislation text with decision implications."""
-
-    prompt = f"""
-    Based on the following legislation text, identify specific organizational actions that must be taken regarding data processing, including their decision implications.
+    Based on the following legislation text, identify specific organizational actions that must be taken regarding data processing.
 
     Legislation Text: {legislation_text}
     Data Categories Mentioned: {data_categories}
@@ -215,8 +127,7 @@ def infer_data_processing_actions_with_decisions(legislation_text: str, data_cat
     2. Related to data handling, processing, storage, transfer, or deletion
     3. Actionable by data controllers or processors at organizational level
     4. Have clear data-specific outcomes
-    5. Impact decision-making scenarios (enable, restrict, or condition decisions)
-    6. Focus on practical data operations like:
+    5. Focus on practical data operations like:
        - Data encryption and security measures
        - Data masking and anonymization
        - Access controls and authentication
@@ -225,7 +136,7 @@ def infer_data_processing_actions_with_decisions(legislation_text: str, data_cat
        - Data transfer protocols
        - Audit logging and monitoring
        - Backup and recovery procedures
-    7. Described in simple, clear English - avoid legal jargon
+    6. Described in simple, clear English without legal jargon or document references
 
     For each action, provide:
     - action_type: Brief descriptive name focused on data operations
@@ -233,15 +144,10 @@ def infer_data_processing_actions_with_decisions(legislation_text: str, data_cat
     - description: What must be done with data in simple English
     - priority: Extract from legislative language (urgent/immediate/high/medium/low)
     - data_specific_steps: Concrete steps related to data handling
-    - responsible_role: Who is responsible for this action
     - legislative_requirement: Exact requirement from legislation
     - data_impact: How this affects data processing
     - verification_method: How to confirm compliance
-    - timeline: Timeline if specified in legislation
     - derived_from_text: Exact legislative text that requires this action
-    - enables_decision: What decision outcome this action enables (yes/no/maybe)
-    - decision_context: What decision scenario this action affects
-    - required_for_decision: What decision type requires this action (for conditional scenarios)
 
     Return valid JSON array. Only include actions explicitly stated or clearly implied by the legislation.
     If no actions can be inferred, return empty array.
@@ -263,11 +169,11 @@ def infer_data_processing_actions_with_decisions(legislation_text: str, data_cat
 
 
 @tool
-def infer_compliance_verification_actions_with_decisions(legislation_text: str, obligations: str, roles: str) -> str:
-    """Infer compliance verification actions from legislation with decision-making implications."""
+def infer_compliance_verification_actions(legislation_text: str, obligations: str, roles: str) -> str:
+    """Infer compliance verification actions from legislation."""
 
     prompt = f"""
-    Based on the legislation text and identified obligations, extract verification and compliance actions with decision implications.
+    Based on the legislation text and identified obligations, extract verification and compliance actions.
 
     Legislation Text: {legislation_text}
     Identified Obligations: {obligations}
@@ -278,8 +184,7 @@ def infer_compliance_verification_actions_with_decisions(legislation_text: str, 
     2. Involve documentation, reporting, or demonstration of data handling
     3. Are mentioned in the legislation text
     4. Can be performed by the specified roles
-    5. Impact decision outcomes (enable decisions or verify conditions are met)
-    6. Focus on practical data verification like:
+    5. Focus on practical data verification like:
        - Data audit procedures
        - Compliance monitoring systems
        - Data processing records
@@ -287,7 +192,7 @@ def infer_compliance_verification_actions_with_decisions(legislation_text: str, 
        - Data breach notification procedures
        - Regular security reviews
        - Third-party data processor audits
-    7. Described in simple, clear English - avoid legal jargon
+    6. Described in simple, clear English without legal jargon or document references
 
     For each verification action:
     - action_type: Type of verification required (focused on data aspects)
@@ -297,9 +202,6 @@ def infer_compliance_verification_actions_with_decisions(legislation_text: str, 
     - legislative_requirement: Specific legal requirement
     - verification_method: How compliance is verified
     - derived_from_text: Exact text requiring this verification
-    - enables_decision: What decision this verification enables
-    - decision_context: What decision scenario this affects
-    - verification_confirms: What condition or requirement this verifies
 
     Return valid JSON array. Base all actions on explicit legislative requirements only.
     If no actions can be inferred, return empty array.
@@ -321,11 +223,11 @@ def infer_compliance_verification_actions_with_decisions(legislation_text: str, 
 
 
 @tool
-def infer_data_subject_rights_actions_with_decisions(legislation_text: str, rights_mentioned: str, data_domains: str) -> str:
-    """Infer actions required to handle data subject rights with decision-making context."""
+def infer_data_subject_rights_actions(legislation_text: str, rights_mentioned: str, data_domains: str) -> str:
+    """Infer actions required to handle data subject rights."""
 
     prompt = f"""
-    Analyze the legislation for requirements related to data subject rights and extract required actions with decision implications.
+    Analyze the legislation for requirements related to data subject rights and extract required actions.
 
     Legislation Text: {legislation_text}
     Rights Mentioned: {rights_mentioned}
@@ -336,8 +238,7 @@ def infer_data_subject_rights_actions_with_decisions(legislation_text: str, righ
     2. Involve handling, processing, or responding to data subject requests
     3. Are explicitly mentioned in the legislation
     4. Have clear data-handling implications
-    5. Enable or affect decision-making about rights exercise
-    6. Focus on practical data rights implementation like:
+    5. Focus on practical data rights implementation like:
        - Data access systems and procedures
        - Data rectification workflows
        - Data erasure and deletion procedures
@@ -345,7 +246,7 @@ def infer_data_subject_rights_actions_with_decisions(legislation_text: str, righ
        - Consent withdrawal mechanisms
        - Objection handling processes
        - Automated decision-making controls
-    7. Described in simple, clear English - avoid legal jargon
+    6. Described in simple, clear English without legal jargon or document references
 
     For each rights-related action:
     - action_type: Type of rights handling required (focused on data operations)
@@ -356,9 +257,6 @@ def infer_data_subject_rights_actions_with_decisions(legislation_text: str, righ
     - data_impact: How this affects data and data processing
     - verification_method: How to confirm rights are being respected
     - derived_from_text: Legislative text requiring this action
-    - enables_decision: What rights-related decision this action enables
-    - decision_context: What rights scenario this action addresses
-    - rights_impact: How this action affects the exercise of data subject rights
 
     Return valid JSON array. Only include actions with clear legislative basis.
     If no actions can be inferred, return empty array.
@@ -380,11 +278,11 @@ def infer_data_subject_rights_actions_with_decisions(legislation_text: str, righ
 
 
 @tool
-def infer_user_actionable_tasks_with_decisions(legislation_text: str, data_context: str, user_roles: str) -> str:
-    """Infer practical tasks that users can perform based on legislation with decision-making capabilities."""
+def infer_user_actionable_tasks(legislation_text: str, data_context: str, user_roles: str) -> str:
+    """Infer practical tasks that users can perform based on legislation."""
 
     prompt = f"""
-    Analyze the following legislation text to identify specific tasks that individual users can perform, including decision-making capabilities.
+    Analyze the following legislation text to identify specific tasks that individual users can perform.
 
     Legislation Text: {legislation_text}
     Data Context: {data_context}
@@ -396,8 +294,7 @@ def infer_user_actionable_tasks_with_decisions(legislation_text: str, data_conte
     3. Related to data operations users can control
     4. Have clear compliance outcomes
     5. Can be practically implemented by users
-    6. Enable or affect decision-making about their data
-    7. Focus on individual data actions like:
+    6. Focus on individual data actions like:
        - Encrypting personal files and communications
        - Using privacy settings on platforms
        - Managing consent preferences
@@ -406,7 +303,7 @@ def infer_user_actionable_tasks_with_decisions(legislation_text: str, data_conte
        - Deleting unnecessary personal data
        - Reviewing data sharing permissions
        - Using secure communication tools
-    8. Described in simple, clear English - avoid legal jargon
+    7. Described in simple, clear English without legal jargon or document references
 
     For each user task, provide:
     - action_type: Specific data operation
@@ -419,9 +316,6 @@ def infer_user_actionable_tasks_with_decisions(legislation_text: str, data_conte
     - compliance_outcome: What compliance goal this achieves
     - user_verification_steps: How users can verify completion
     - derived_from_text: Exact text requiring this task
-    - enables_decision: What decision this user action enables about their data
-    - decision_context: What decision scenario this affects
-    - decision_impact: How this action affects decision outcomes for the user
 
     Focus on practical, implementable data tasks. Avoid abstract concepts.
     Return valid JSON array based ONLY on explicit legislative requirements.
@@ -444,11 +338,11 @@ def infer_user_actionable_tasks_with_decisions(legislation_text: str, data_conte
 
 
 @tool
-def infer_user_compliance_tasks_with_decisions(legislation_text: str, compliance_obligations: str, data_domains: str) -> str:
-    """Infer compliance-related tasks users can perform with decision-making implications."""
+def infer_user_compliance_tasks(legislation_text: str, compliance_obligations: str, data_domains: str) -> str:
+    """Infer compliance-related tasks users can perform."""
 
     prompt = f"""
-    Based on the legislation and compliance obligations, identify specific tasks users can perform with decision implications.
+    Based on the legislation and compliance obligations, identify specific tasks users can perform.
 
     Legislation Text: {legislation_text}
     Compliance Obligations: {compliance_obligations}
@@ -460,8 +354,7 @@ def infer_user_compliance_tasks_with_decisions(legislation_text: str, compliance
     3. Handling data subject requests they receive
     4. Conducting self-assessments and audits
     5. Establishing processes and procedures within their control
-    6. Making informed decisions about their data
-    7. Individual data compliance actions like:
+    6. Individual data compliance actions like:
        - Maintaining personal data inventories
        - Implementing data retention schedules
        - Setting up automatic data deletion
@@ -469,7 +362,7 @@ def infer_user_compliance_tasks_with_decisions(legislation_text: str, compliance
        - Establishing secure data sharing practices
        - Using privacy-focused tools and services
        - Regular security updates and patches
-    8. Described in simple, clear English - avoid legal jargon
+    7. Described in simple, clear English without legal jargon or document references
 
     For each user compliance task:
     - action_type: Type of compliance task (focused on data)
@@ -480,9 +373,6 @@ def infer_user_compliance_tasks_with_decisions(legislation_text: str, compliance
     - compliance_outcome: Compliance goal achieved
     - user_verification_steps: How to confirm compliance
     - derived_from_text: Legislative text requiring this
-    - enables_decision: What decision this task enables for users
-    - decision_context: What decision scenario this addresses
-    - compliance_impact: How this task affects overall compliance
 
     Return valid JSON array. Base tasks on explicit legislative requirements.
     If no user compliance tasks can be inferred, return empty array.
@@ -504,11 +394,11 @@ def infer_user_compliance_tasks_with_decisions(legislation_text: str, compliance
 
 
 @tool
-def infer_user_rights_support_tasks_with_decisions(legislation_text: str, rights_context: str, processing_activities: str) -> str:
-    """Infer tasks users can perform to support data subject rights with decision-making capabilities."""
+def infer_user_rights_support_tasks(legislation_text: str, rights_context: str, processing_activities: str) -> str:
+    """Infer tasks users can perform to support data subject rights."""
 
     prompt = f"""
-    Analyze the legislation for tasks users can perform to facilitate data subject rights with decision implications.
+    Analyze the legislation for tasks users can perform to facilitate data subject rights.
 
     Legislation Text: {legislation_text}
     Rights Context: {rights_context}
@@ -520,8 +410,7 @@ def infer_user_rights_support_tasks_with_decisions(legislation_text: str, rights
     3. Ensuring data portability capabilities within their systems
     4. Managing consent and withdrawal mechanisms
     5. Handling objections and restrictions
-    6. Making informed decisions about rights exercise
-    7. Individual rights support actions like:
+    6. Individual rights support actions like:
        - Creating personal data access tools
        - Setting up data export capabilities
        - Implementing consent tracking systems
@@ -529,7 +418,7 @@ def infer_user_rights_support_tasks_with_decisions(legislation_text: str, rights
        - Setting up automated deletion triggers
        - Maintaining contact preferences
        - Using privacy-preserving technologies
-    8. Described in simple, clear English - avoid legal jargon
+    7. Described in simple, clear English without legal jargon or document references
 
     For each rights-support task:
     - action_type: Type of rights support task (focused on data)
@@ -540,9 +429,6 @@ def infer_user_rights_support_tasks_with_decisions(legislation_text: str, rights
     - legislative_requirement: Rights provision requiring this
     - compliance_outcome: Rights facilitation achieved
     - derived_from_text: Text mandating this task
-    - enables_decision: What rights-related decision this enables
-    - decision_context: What rights scenario this addresses
-    - rights_impact: How this task supports rights exercise
 
     Return valid JSON array. Focus on practical implementation by users.
     If no user rights support tasks can be inferred, return empty array.
@@ -561,3 +447,119 @@ def infer_user_rights_support_tasks_with_decisions(legislation_text: str, rights
         return response.choices[0].message.content
     except Exception as e:
         return f"Error inferring user rights support tasks: {str(e)}"
+
+
+@tool
+def infer_decision_scenarios(legislation_text: str, data_context: str, processing_context: str) -> str:
+    """Infer decision scenarios with yes/no/maybe outcomes from legislation text."""
+
+    prompt = f"""
+    Analyze the following legislation text to identify decision scenarios that result in yes, no, or maybe outcomes.
+
+    Legislation Text: {legislation_text}
+    Data Context: {data_context}
+    Processing Context: {processing_context}
+
+    Identify decision scenarios that involve:
+    1. Cross-border data transfers (allowed/prohibited/conditional)
+    2. Data processing authorizations (permitted/forbidden/requires safeguards)
+    3. Consent requirements (required/not required/depends on circumstances)
+    4. Data sharing permissions (allowed/prohibited/needs additional protection)
+    5. Automated decision making (permitted/forbidden/requires human oversight)
+    6. Data retention decisions (allowed/must delete/depends on purpose)
+    7. Access permissions (granted/denied/conditional)
+
+    For each decision scenario, extract:
+    - decision_type: Type from data_transfer, data_processing, consent_requirement, access_permission, sharing_permission, compliance_status
+    - decision_context: Context from cross_border_transfer, internal_processing, third_party_sharing, data_subject_request, regulatory_compliance, security_assessment
+    - scenario: Clear description of the decision situation in simple English
+    - outcome: Primary outcome (yes/no/maybe) based on legislation
+    - conditions_for_yes: List of conditions that would result in yes
+    - conditions_for_no: List of conditions that would result in no  
+    - conditions_for_maybe: List of conditions that would result in maybe
+    - required_actions_for_yes: Actions needed for yes outcome
+    - required_actions_for_maybe: Actions needed to move from maybe to yes
+    - rationale: Clear explanation of the decision logic in simple English
+    - applicable_data_categories: Data types this decision applies to
+    - applicable_roles: Roles affected by this decision
+    - cross_border: Whether this involves cross-border operations
+    - derived_from_text: Exact legislative text that creates this decision scenario
+
+    DECISION EXAMPLES TO LOOK FOR:
+    - "Personal data may be transferred to a third country if adequate protection is ensured" → MAYBE (requires adequate protection)
+    - "Processing is prohibited without explicit consent" → NO unless consent obtained
+    - "Automated decision making requires human oversight" → MAYBE (requires human oversight)
+    - "Data must be deleted when purpose is fulfilled" → YES for deletion when purpose ends
+    - "Sensitive data processing requires special safeguards" → MAYBE (requires special safeguards)
+
+    Return valid JSON array of decision objects.
+    Base all decisions on explicit legislative requirements.
+    Use simple, clear English without legal jargon or document references.
+    If no decision scenarios can be identified, return empty array.
+    """
+
+    try:
+        client = OpenAI(
+            api_key=Config.API_KEY,
+            base_url=Config.BASE_URL
+        )
+
+        response = client.chat.completions.create(
+            model=Config.CHAT_MODEL,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error inferring decision scenarios: {str(e)}"
+
+
+@tool
+def infer_conditional_permissions(legislation_text: str, roles_context: str, data_types: str) -> str:
+    """Infer conditional permissions and their requirements from legislation."""
+
+    prompt = f"""
+    Analyze the legislation text to identify conditional permissions and their requirements.
+
+    Legislation Text: {legislation_text}
+    Roles Context: {roles_context}
+    Data Types: {data_types}
+
+    Look for scenarios where:
+    1. Permission is granted IF certain conditions are met
+    2. Actions are prohibited UNLESS safeguards are in place
+    3. Processing is allowed WHEN specific requirements are fulfilled
+    4. Transfers are permitted PROVIDED adequate protection exists
+
+    For each conditional permission, identify:
+    - The action or processing that is conditionally allowed
+    - The specific conditions that must be met
+    - The consequences if conditions are not met
+    - The actions required to meet the conditions
+    - Whether this results in yes/no/maybe decision outcomes
+
+    Focus on practical scenarios like:
+    - Data transfers with adequacy requirements
+    - Processing with consent requirements
+    - Sharing with contractual safeguards
+    - Automated processing with human oversight
+    - Retention with purpose limitations
+    - Access with identity verification
+
+    Return analysis of conditional permissions that can inform decision scenarios.
+    Use simple, clear English without legal jargon or document references.
+    Base analysis on explicit legislative text only.
+    """
+
+    try:
+        client = OpenAI(
+            api_key=Config.API_KEY,
+            base_url=Config.BASE_URL
+        )
+
+        response = client.chat.completions.create(
+            model=Config.CHAT_MODEL,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error inferring conditional permissions: {str(e)}"
