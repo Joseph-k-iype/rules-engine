@@ -1,0 +1,398 @@
+{
+  "@context": {
+    "dpv": "https://w3id.org/dpv#",
+    "dpv-pd": "https://w3id.org/dpv/dpv-pd#", 
+    "dpv-action": "https://w3id.org/dpv/actions#",
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "odre": "https://w3id.org/def/odre#",
+    "rules": "https://w3id.org/legislation-rules#",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#"
+  },
+  "@graph": [
+    {
+      "@id": "urn:rule:gdpr_cross_border_data_transfer_rule_001",
+      "@type": "rules:LegislationRule",
+      "rdfs:label": "GDPR Cross-Border Data Transfer with Conditional Permissions",
+      "rules:description": "Complex rule governing cross-border transfers of personal data from EU to third countries with adequacy assessment and conditional safeguards",
+      "rules:sourceArticle": "GDPR Article 44-49",
+      "rules:sourceFile": "gdpr_chapter_5_transfers.pdf",
+      "rules:priority": {
+        "@value": 1,
+        "@type": "xsd:integer"
+      },
+      "rules:confidenceScore": {
+        "@value": 0.95,
+        "@type": "xsd:float"
+      },
+      "rules:primaryImpactedRole": "controller",
+      "rules:secondaryImpactedRole": "processor",
+      "rules:dataCategory": ["personal_data", "sensitive_data", "financial_data"],
+      "rules:applicableCountry": ["EU", "Germany", "France", "Italy"],
+      "rules:adequacyCountry": ["Switzerland", "Canada", "Japan"],
+      
+      "rules:hasDecisionLogic": [
+        {
+          "@type": "rules:DecisionLogic",
+          "rules:logicType": "all",
+          "rules:hasCondition": [
+            {
+              "@type": "rules:RuleCondition",
+              "rules:fact": "data_transfer_target_country",
+              "rules:operator": "in",
+              "rules:value": "third_country_outside_eu",
+              "rules:description": "Data transfer involves a third country outside the European Economic Area",
+              "rules:reasoning": "Article 44 GDPR applies when personal data is transferred to third countries",
+              "rules:role": "controller",
+              "rules:dataDomain": ["data_transfer"],
+              "rules:documentLevel": "level_1",
+              "rules:chunkReference": "chunk_1_5"
+            },
+            {
+              "@type": "rules:RuleCondition", 
+              "rules:fact": "data_subject_consent_status",
+              "rules:operator": "equal",
+              "rules:value": "explicit_consent_obtained",
+              "rules:description": "Explicit consent from data subjects for international transfer",
+              "rules:reasoning": "Article 49(1)(a) allows transfers based on explicit consent",
+              "rules:role": "data_subject",
+              "rules:dataDomain": ["data_usage", "data_transfer"],
+              "rules:documentLevel": "level_1"
+            },
+            {
+              "@type": "rules:RuleCondition",
+              "rules:fact": "adequacy_decision_exists",
+              "rules:operator": "equal", 
+              "rules:value": false,
+              "rules:description": "No adequacy decision exists for the target country",
+              "rules:reasoning": "Articles 45-46 require adequacy decisions or appropriate safeguards",
+              "rules:role": "controller",
+              "rules:dataDomain": ["data_transfer"],
+              "rules:documentLevel": "level_1"
+            }
+          ]
+        }
+      ],
+
+      "rules:hasRuleAction": [
+        {
+          "@type": "rules:RuleAction",
+          "rules:actionType": "implement_data_transfer_safeguards",
+          "rules:title": "Implement Appropriate Safeguards for Third Country Transfer",
+          "rules:description": "Establish binding corporate rules or standard contractual clauses to ensure adequate protection level equivalent to GDPR",
+          "rules:priority": "urgent",
+          "rules:legislativeRequirement": "Article 46 GDPR requires appropriate safeguards including legally binding and enforceable rights for data subjects",
+          "rules:dataImpact": "Enables compliant cross-border data transfer while maintaining GDPR protection standards",
+          "rules:dataSpecificStep": [
+            "Conduct transfer impact assessment according to EDPB guidelines",
+            "Implement standard contractual clauses approved by European Commission", 
+            "Establish binding corporate rules if applicable",
+            "Document adequacy of protection measures",
+            "Set up oversight mechanisms for ongoing compliance monitoring"
+          ],
+          "rules:verificationMethod": [
+            "Legal review of transfer agreements",
+            "Data protection impact assessment",
+            "Supervisory authority consultation if required"
+          ],
+          "rules:responsibleRole": "controller",
+          "rules:timeline": "Before any data transfer commences",
+          "rules:confidenceScore": {
+            "@value": 0.92,
+            "@type": "xsd:float"
+          }
+        },
+        {
+          "@type": "rules:RuleAction", 
+          "rules:actionType": "establish_data_transfer_governance",
+          "rules:title": "Establish Cross-Border Data Transfer Governance Framework",
+          "rules:description": "Create comprehensive governance framework including policies, procedures, and oversight mechanisms for international data transfers",
+          "rules:priority": "high",
+          "rules:legislativeRequirement": "Articles 44, 47, and 28 GDPR require demonstrable compliance and accountability",
+          "rules:dataImpact": "Ensures systematic compliance with transfer requirements across all processing operations",
+          "rules:dataSpecificStep": [
+            "Develop data transfer policy aligned with GDPR Chapter V",
+            "Create transfer request approval workflow",
+            "Implement automated transfer logging and monitoring",
+            "Establish regular compliance auditing procedures",
+            "Train staff on international transfer requirements"
+          ],
+          "rules:verificationMethod": [
+            "Policy documentation review",
+            "Transfer log analysis", 
+            "Staff training records verification",
+            "Compliance audit reports"
+          ],
+          "rules:responsibleRole": "controller",
+          "rules:confidenceScore": {
+            "@value": 0.88,
+            "@type": "xsd:float"
+          }
+        }
+      ],
+
+      "rules:hasUserAction": [
+        {
+          "@type": "rules:UserAction",
+          "rules:actionType": "provide_explicit_transfer_consent",
+          "rules:title": "Provide Explicit Consent for Cross-Border Data Transfer", 
+          "rules:description": "Give specific, informed, and freely given consent for transfer of personal data to third countries outside EU/EEA",
+          "rules:priority": "high",
+          "rules:legislativeRequirement": "Article 49(1)(a) GDPR allows transfers based on explicit consent with full information about risks",
+          "rules:complianceOutcome": "Enables lawful cross-border data transfer when adequacy decision or safeguards are not available",
+          "rules:userDataStep": [
+            "Review detailed information about proposed data transfer including destination country",
+            "Understand risks associated with transfer to country without adequacy decision",
+            "Provide specific consent for each category of personal data to be transferred",
+            "Understand right to withdraw consent at any time",
+            "Keep record of consent decision for personal reference"
+          ],
+          "rules:affectedDataCategory": ["personal_data", "financial_data"],
+          "rules:userRoleContext": "data_subject",
+          "rules:userVerificationStep": [
+            "Confirm consent was given voluntarily without coercion",
+            "Verify understanding of transfer implications", 
+            "Document consent decision in personal records"
+          ],
+          "rules:confidenceScore": {
+            "@value": 0.90,
+            "@type": "xsd:float"
+          }
+        },
+        {
+          "@type": "rules:UserAction",
+          "rules:actionType": "monitor_cross_border_data_usage",
+          "rules:title": "Monitor Cross-Border Data Usage and Exercise Rights",
+          "rules:description": "Actively monitor how personal data is used after cross-border transfer and exercise data subject rights when necessary",
+          "rules:priority": "medium", 
+          "rules:legislativeRequirement": "Articles 15-22 GDPR provide data subject rights that remain applicable after international transfers",
+          "rules:complianceOutcome": "Maintains control over personal data and ensures continued GDPR protection after transfer",
+          "rules:userDataStep": [
+            "Request information about data processing activities in third country",
+            "Monitor compliance with original transfer conditions",
+            "Exercise right of access to verify appropriate data handling",
+            "Request rectification or erasure if processing violates GDPR",
+            "File complaints with supervisory authority if necessary"
+          ],
+          "rules:affectedDataCategory": ["personal_data", "sensitive_data", "financial_data"],
+          "rules:userRoleContext": "data_subject",
+          "rules:userVerificationStep": [
+            "Review responses to data subject requests",
+            "Verify continued compliance with transfer conditions",
+            "Document any issues or violations observed"
+          ],
+          "rules:timeline": "Ongoing monitoring after consent given",
+          "rules:confidenceScore": {
+            "@value": 0.85,
+            "@type": "xsd:float"
+          }
+        }
+      ],
+
+      "rules:hasDecision": [
+        {
+          "@type": "rules:RuleDecision",
+          "rules:decisionType": "data_transfer",
+          "rules:decisionContext": "cross_border_transfer",
+          "rules:outcome": "maybe",
+          "rules:scenario": "Transfer of personal and financial data from EU entity to US subsidiary for customer support services",
+          "rules:rationale": "Transfer is conditional on implementing adequate safeguards since no adequacy decision exists for US and explicit consent may not cover all processing purposes",
+          "rules:conditionForYes": [
+            "Standard contractual clauses properly implemented and signed",
+            "Transfer impact assessment completed with positive outcome", 
+            "Data subjects provided explicit consent with full information",
+            "Appropriate technical and organizational measures implemented"
+          ],
+          "rules:conditionForNo": [
+            "No legal basis for transfer available",
+            "Data subjects explicitly refuse consent",
+            "Target country laws prevent adequate protection",
+            "Transfer impact assessment shows high risk without mitigation"
+          ],
+          "rules:conditionForMaybe": [
+            "Adequacy decision pending but not yet adopted",
+            "Standard contractual clauses available but not yet implemented",
+            "Data subject consent process initiated but not completed",
+            "Technical safeguards identified but not yet deployed"
+          ],
+          "rules:requiredActionForYes": [
+            "Execute standard contractual clauses with receiving entity",
+            "Complete and document transfer impact assessment",
+            "Obtain and record explicit data subject consent",
+            "Implement encryption and access controls for transferred data"
+          ],
+          "rules:requiredActionForMaybe": [
+            "Conduct preliminary adequacy assessment of target jurisdiction",
+            "Prepare draft standard contractual clauses for legal review",
+            "Design consent mechanism with clear information about transfer risks", 
+            "Evaluate technical safeguards including encryption and pseudonymization"
+          ],
+          "rules:decisionFactor": [
+            "Existence of adequacy decision for target country",
+            "Availability and implementation of appropriate safeguards",
+            "Data subject consent status and scope",
+            "Nature and sensitivity of data being transferred",
+            "Purpose and necessity of international transfer"
+          ],
+          "rules:applicableDataCategory": ["personal_data", "financial_data"],
+          "rules:applicableRole": ["controller", "data_subject"],
+          "rules:sourceJurisdiction": "EU",
+          "rules:targetJurisdiction": "US",
+          "rules:crossBorder": true,
+          "rules:confidenceScore": {
+            "@value": 0.93,
+            "@type": "xsd:float"
+          }
+        },
+        {
+          "@type": "rules:RuleDecision",
+          "rules:decisionType": "consent_requirement", 
+          "rules:decisionContext": "data_subject_request",
+          "rules:outcome": "yes",
+          "rules:scenario": "Data subject consent required for transfer to country without adequacy decision when no other legal basis applies",
+          "rules:rationale": "Article 49(1)(a) explicitly requires consent for transfers to third countries when adequacy decision or appropriate safeguards are not available",
+          "rules:conditionForYes": [
+            "No adequacy decision exists for target country",
+            "No appropriate safeguards implemented under Articles 46-47",
+            "Transfer is not necessary for important reasons of public interest",
+            "Transfer is not necessary for performance of contract"
+          ],
+          "rules:requiredActionForYes": [
+            "Provide clear and comprehensive information about transfer risks",
+            "Obtain explicit, specific, and informed consent",
+            "Document consent with date, time, and information provided",
+            "Inform data subject of right to withdraw consent"
+          ],
+          "rules:applicableDataCategory": ["personal_data", "sensitive_data"],
+          "rules:applicableRole": ["data_subject"],
+          "rules:crossBorder": true,
+          "rules:confidenceScore": {
+            "@value": 0.96,
+            "@type": "xsd:float"
+          }
+        }
+      ],
+
+      "rules:eventType": "cross_border_transfer_compliance_required",
+      "rules:extractedAt": {
+        "@value": "2024-01-15T14:30:00Z",
+        "@type": "xsd:dateTime"
+      },
+      "rules:extractionMethod": "comprehensive_analysis_with_dual_actions_and_decisions"
+    },
+
+    {
+      "@id": "urn:rule:integrated:gdpr_cross_border_data_transfer_rule_001",
+      "@type": ["odre:EnforceablePolicy", "dpv:ProcessingActivity"],
+      "rdfs:label": "Integrated GDPR Cross-Border Transfer Policy",
+      
+      "odre:enforceable": true,
+      "odre:enforcement_mode": "dual_action_based_with_decisions",
+      "odre:action_inference": true,
+      "odre:user_action_inference": true, 
+      "odre:decision_inference": true,
+
+      "dpv:hasProcessing": [
+        {"@id": "dpv:Transfer"},
+        {"@id": "dpv:Share"},
+        {"@id": "dpv:Store"}
+      ],
+      "dpv:hasPurpose": [
+        {"@id": "dpv:CustomerSupport"},
+        {"@id": "dpv:ServiceProvision"},
+        {"@id": "dpv:LegitimateInterests"}
+      ],
+      "dpv:hasPersonalData": [
+        {"@id": "dpv:PersonalData"},
+        {"@id": "dpv:SensitivePersonalData"}, 
+        {"@id": "dpv-pd:Financial"}
+      ],
+      "dpv:hasDataController": {"@id": "dpv:DataController"},
+      "dpv:hasLocation": [
+        {"@id": "dpv:Country_EU"},
+        {"@id": "dpv:Country_US"}
+      ],
+      "dpv-action:hasRuleAction": [
+        {"@id": "dpv-action:ImplementDataTransferSafeguards"},
+        {"@id": "dpv-action:EstablishDataTransferGovernance"}
+      ],
+      "dpv-action:hasUserAction": [
+        {"@id": "dpv-action:UserProvideExplicitTransferConsent"},
+        {"@id": "dpv-action:UserMonitorCrossBorderDataUsage"}  
+      ],
+      "dpv-action:hasDecision": [
+        {"@id": "dpv-action:DataTransferCrossBorderTransferMaybe"},
+        {"@id": "dpv-action:ConsentRequirementDataSubjectRequestYes"}
+      ],
+      "dpv-action:hasDecisionOutcome": [
+        {"@id": "dpv-action:ConditionalOutcome"},
+        {"@id": "dpv-action:PermittedOutcome"}
+      ],
+
+      "odrl:permission": [
+        {
+          "target": "urn:asset:gdpr_chapter_5_transfers.pdf:gdpr_cross_border_data_transfer_rule_001:data_transfer_decision_001",
+          "action": "transfer",
+          "constraint": [
+            {
+              "leftOperand": "required_condition",
+              "operator": "eq",
+              "rightOperand": "Standard contractual clauses properly implemented and signed",
+              "comment": "Required condition: Standard contractual clauses properly implemented and signed"
+            },
+            {
+              "leftOperand": "required_action", 
+              "operator": "eq",
+              "rightOperand": "Execute standard contractual clauses with receiving entity",
+              "comment": "Required action: Execute standard contractual clauses with receiving entity"
+            },
+            {
+              "leftOperand": "source_jurisdiction",
+              "operator": "eq", 
+              "rightOperand": "EU",
+              "comment": "Source jurisdiction: EU"
+            },
+            {
+              "leftOperand": "target_jurisdiction",
+              "operator": "eq",
+              "rightOperand": "US", 
+              "comment": "Target jurisdiction: US"
+            }
+          ],
+          "decision_scenario": "Transfer of personal and financial data from EU entity to US subsidiary for customer support services",
+          "decision_rationale": "Transfer is conditional on implementing adequate safeguards since no adequacy decision exists for US and explicit consent may not cover all processing purposes",
+          "decision_outcome": "maybe"
+        }
+      ],
+      "odrl:obligation": [
+        {
+          "target": "urn:asset:gdpr_chapter_5_transfers.pdf:gdpr_cross_border_data_transfer_rule_001:consent_decision_001",
+          "action": "obtain",
+          "constraint": [
+            {
+              "leftOperand": "fulfillment_condition",
+              "operator": "eq",
+              "rightOperand": "No adequacy decision exists for target country", 
+              "comment": "Fulfillment condition: No adequacy decision exists for target country"
+            }
+          ],
+          "decision_scenario": "Data subject consent required for transfer to country without adequacy decision when no other legal basis applies",
+          "decision_rationale": "Article 49(1)(a) explicitly requires consent for transfers to third countries when adequacy decision or appropriate safeguards are not available",
+          "decision_outcome": "yes"
+        }
+      ],
+
+      "rules:originalRule": {"@id": "urn:rule:gdpr_cross_border_data_transfer_rule_001"},
+      "dpv:hasConfidenceScore": {
+        "@value": 0.95,
+        "@type": "xsd:float"
+      },
+      "dpv:extractedAt": {
+        "@value": "2024-01-15T14:30:00Z", 
+        "@type": "xsd:dateTime"
+      },
+      "dpv:sourceLegislation": "gdpr_chapter_5_transfers.pdf"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 """
 Data models for the legislation rules converter.
-Enhanced with decision-making capabilities.
+Enhanced with combined actions structure and decision-making capabilities.
 """
 
 from .enums import (
@@ -9,7 +9,7 @@ from .enums import (
     DecisionOutcome, DecisionType, DecisionContext
 )
 from .base_models import (
-    RuleAction, UserAction, RuleCondition, RuleEvent, 
+    RuleAction, UserAction, CombinedAction, RuleCondition, RuleEvent, 
     CountryMetadata, DocumentChunk, IntegratedRule, RuleDecision
 )
 from .rules import LegislationRule, ExtractionResult
@@ -29,7 +29,8 @@ __all__ = [
     "DecisionContext",
     # Base Models
     "RuleAction",
-    "UserAction", 
+    "UserAction",
+    "CombinedAction",  # New combined action class
     "RuleCondition",
     "RuleEvent",
     "CountryMetadata",

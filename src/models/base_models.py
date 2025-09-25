@@ -1,6 +1,6 @@
 """
 Base data models for the legislation rules converter.
-Enhanced with decision-making capabilities.
+Enhanced with combined actions structure and decision-making capabilities.
 """
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union
@@ -67,6 +67,81 @@ class UserAction(BaseModel):
     # Metadata
     derived_from_text: str = Field(..., description="Legislative text this action was derived from")
     confidence_score: float = Field(..., ge=0.0, le=1.0, description="Confidence in action inference")
+
+
+class CombinedAction(BaseModel):
+    """Combined action that can be either organizational or individual."""
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: str = Field(..., description="Unique action identifier")
+    action_category: str = Field(..., description="Category: 'organizational' or 'individual'")
+    action_type: str = Field(..., description="Type of action")
+    title: str = Field(..., description="Action title in simple English")
+    description: str = Field(..., description="What must be done in simple English")
+    priority: str = Field(..., description="Action priority")
+
+    # Common fields
+    legislative_requirement: str = Field(..., description="Specific legislative requirement")
+    timeline: Optional[str] = Field(None, description="Timeline if specified")
+    applicable_countries: List[str] = Field(default_factory=list, description="Countries where action applies")
+    confidence_score: float = Field(..., ge=0.0, le=1.0, description="Confidence in action relevance")
+    derived_from_text: str = Field(..., description="Legislative text this action was derived from")
+
+    # Organizational-specific fields (populated when action_category = 'organizational')
+    data_specific_steps: List[str] = Field(default_factory=list, description="Specific steps for data handling")
+    responsible_role: Optional[str] = Field(None, description="Who is responsible for this action")
+    data_impact: str = Field(default="", description="How this affects data processing")
+    verification_method: List[str] = Field(default_factory=list, description="How to verify completion")
+
+    # Individual-specific fields (populated when action_category = 'individual')
+    user_data_steps: List[str] = Field(default_factory=list, description="Concrete steps for user data handling")
+    affected_data_categories: List[str] = Field(default_factory=list, description="Data categories affected")
+    user_role_context: Optional[str] = Field(None, description="User's role when performing this action")
+    compliance_outcome: str = Field(default="", description="What compliance outcome this achieves")
+    user_verification_steps: List[str] = Field(default_factory=list, description="How user can verify completion")
+
+    @classmethod
+    def from_rule_action(cls, rule_action: RuleAction) -> "CombinedAction":
+        """Create a CombinedAction from a RuleAction."""
+        return cls(
+            id=rule_action.id,
+            action_category="organizational",
+            action_type=rule_action.action_type,
+            title=rule_action.title,
+            description=rule_action.description,
+            priority=rule_action.priority,
+            legislative_requirement=rule_action.legislative_requirement,
+            timeline=rule_action.timeline,
+            applicable_countries=rule_action.applicable_countries,
+            confidence_score=rule_action.confidence_score,
+            derived_from_text=rule_action.derived_from_text,
+            data_specific_steps=rule_action.data_specific_steps,
+            responsible_role=rule_action.responsible_role,
+            data_impact=rule_action.data_impact,
+            verification_method=rule_action.verification_method
+        )
+
+    @classmethod
+    def from_user_action(cls, user_action: UserAction) -> "CombinedAction":
+        """Create a CombinedAction from a UserAction."""
+        return cls(
+            id=user_action.id,
+            action_category="individual",
+            action_type=user_action.action_type,
+            title=user_action.title,
+            description=user_action.description,
+            priority=user_action.priority,
+            legislative_requirement=user_action.legislative_requirement,
+            timeline=user_action.timeline,
+            applicable_countries=[],  # UserAction doesn't have this field
+            confidence_score=user_action.confidence_score,
+            derived_from_text=user_action.derived_from_text,
+            user_data_steps=user_action.user_data_steps,
+            affected_data_categories=user_action.affected_data_categories,
+            user_role_context=user_action.user_role_context,
+            compliance_outcome=user_action.compliance_outcome,
+            user_verification_steps=user_action.user_verification_steps
+        )
 
 
 class RuleDecision(BaseModel):
@@ -250,7 +325,7 @@ class DocumentChunk:
 
 
 class IntegratedRule(BaseModel):
-    """Unified rule that combines DPV, ODRL, and ODRE elements with decision capabilities."""
+    """Unified rule that combines DPV, ODRL, and ODRE elements with combined actions structure."""
 
     id: str = Field(..., description="Unique rule identifier")
     type: str = Field(default="odre:EnforceablePolicy", description="Unified rule type")
@@ -264,11 +339,14 @@ class IntegratedRule(BaseModel):
     dpv_hasLegalBasis: Optional[str] = Field(None, description="DPV: Legal basis for processing")
     dpv_hasLocation: List[str] = Field(default_factory=list, description="DPV: Processing locations/countries")
 
-    # DPV Actions - Dynamically inferred
-    dpv_hasRuleAction: List[str] = Field(default_factory=list, description="DPV: Rule actions inferred from legislation")
-    dpv_hasUserAction: List[str] = Field(default_factory=list, description="DPV: User actions inferred from legislation")
+    # Combined Actions - Replaces separate rule and user actions
+    dpv_hasAction: List[str] = Field(default_factory=list, description="DPV: Combined actions (organizational + individual)")
+    
+    # Backwards compatibility (deprecated but maintained)
+    dpv_hasRuleAction: List[str] = Field(default_factory=list, description="DPV: Rule actions inferred from legislation (deprecated)")
+    dpv_hasUserAction: List[str] = Field(default_factory=list, description="DPV: User actions inferred from legislation (deprecated)")
 
-    # DPV Decisions - New decision inference capabilities
+    # DPV Decisions - Decision inference capabilities
     dpv_hasDecision: List[str] = Field(default_factory=list, description="DPV: Decisions that can be made")
     dpv_hasDecisionOutcome: List[str] = Field(default_factory=list, description="DPV: Possible decision outcomes")
 
@@ -279,7 +357,7 @@ class IntegratedRule(BaseModel):
 
     # ODRE Properties
     odre_enforceable: bool = Field(default=True, description="ODRE: Enforceable flag")
-    odre_enforcement_mode: str = Field(default="dual_action_based", description="ODRE: Enforcement mode")
+    odre_enforcement_mode: str = Field(default="combined_action_based", description="ODRE: Enforcement mode")
     odre_action_inference: bool = Field(default=True, description="ODRE: Action inference enabled")
     odre_user_action_inference: bool = Field(default=True, description="ODRE: User action inference enabled")
     odre_decision_inference: bool = Field(default=True, description="ODRE: Decision inference enabled")
@@ -293,3 +371,18 @@ class IntegratedRule(BaseModel):
     source_article: str = Field(..., description="Source article/section")
     extracted_at: datetime = Field(default_factory=datetime.utcnow)
     confidence_score: float = Field(..., ge=0.0, le=1.0)
+
+    def get_combined_actions(self) -> List[str]:
+        """Get all actions (combined from rule actions and user actions)."""
+        # Return the combined actions, or fall back to combining deprecated fields
+        if self.dpv_hasAction:
+            return self.dpv_hasAction
+        else:
+            return (self.dpv_hasRuleAction or []) + (self.dpv_hasUserAction or [])
+
+    def set_combined_actions(self, actions: List[str]):
+        """Set combined actions and clear deprecated separate fields."""
+        self.dpv_hasAction = actions
+        # Clear deprecated fields to avoid confusion
+        self.dpv_hasRuleAction = []
+        self.dpv_hasUserAction = []

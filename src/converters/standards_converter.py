@@ -1,18 +1,18 @@
 """
 Standards converter for DPV, ODRL, and ODRE integration.
-Enhanced with decision-making capabilities.
+Enhanced with combined actions structure and decision-making capabilities.
 """
 from datetime import datetime
 from typing import Dict, Any, List
 
 from ..models.rules import LegislationRule
-from ..models.base_models import IntegratedRule
+from ..models.base_models import IntegratedRule, CombinedAction
 from ..models.enums import ProcessingPurpose, LegalBasis
 from ..config import Config
 
 
 class DPVConcepts:
-    """DPV (Data Privacy Vocabulary) concept mappings with GDPR-compliant processing purposes and decision support."""
+    """DPV (Data Privacy Vocabulary) concept mappings with GDPR-compliant processing purposes, combined actions, and decision support."""
 
     # Updated DPV Core Namespaces v2.1
     DPV = Config.DPV_NAMESPACE
@@ -98,13 +98,26 @@ class DPVConcepts:
         "maybe": f"{DPV_ACTION}ConditionalOutcome"
     }
 
-    # Dynamic action mapping (no hardcoded actions)
+    # Action category mappings
+    ACTION_CATEGORIES = {
+        "organizational": f"{DPV_ACTION}OrganizationalAction",
+        "individual": f"{DPV_ACTION}IndividualAction"
+    }
+
+    # Dynamic action mapping (no hardcoded actions) - combined approach
+    @classmethod
+    def get_combined_action_uri(cls, action_type: str, action_category: str) -> str:
+        """Generate combined action URI dynamically based on action type and category."""
+        category_prefix = action_category.capitalize() if action_category else ""
+        action_name = ''.join(word.capitalize() for word in action_type.replace('_', ' ').split())
+        return f"{cls.DPV_ACTION}{category_prefix}{action_name}"
+
+    # Backwards compatibility methods
     @classmethod
     def get_action_uri(cls, action_type: str, is_user_action: bool = False) -> str:
-        """Generate action URI dynamically based on action type."""
-        action_prefix = "User" if is_user_action else ""
-        action_name = ''.join(word.capitalize() for word in action_type.replace('_', ' ').split())
-        return f"{cls.DPV_ACTION}{action_prefix}{action_name}"
+        """Generate action URI dynamically based on action type (backwards compatibility)."""
+        action_category = "individual" if is_user_action else "organizational"
+        return cls.get_combined_action_uri(action_type, action_category)
 
     # Dynamic decision mapping
     @classmethod
@@ -117,25 +130,25 @@ class DPVConcepts:
 
 
 class StandardsConverter:
-    """Converts between JSON Rules Engine and integrated DPV+ODRL+ODRE format with decision support."""
+    """Converts between JSON Rules Engine and integrated DPV+ODRL+ODRE format with combined actions and decision support."""
 
     def __init__(self):
         self.dpv_concepts = DPVConcepts()
 
     def json_rules_to_integrated(self, legislation_rule: LegislationRule) -> IntegratedRule:
-        """Convert JSON Rules Engine rule to integrated format with decision support."""
+        """Convert JSON Rules Engine rule to integrated format with combined actions and decision support."""
 
-        # Extract DPV elements
-        dpv_elements = self._extract_dpv_elements(legislation_rule)
+        # Extract DPV elements with combined actions
+        dpv_elements = self._extract_dpv_elements_with_combined_actions(legislation_rule)
 
         # Extract ODRL elements  
         odrl_elements = self._extract_odrl_elements(legislation_rule)
 
         # Create integrated rule
-        return self._create_integrated_rule(legislation_rule, dpv_elements, odrl_elements)
+        return self._create_integrated_rule_with_combined_actions(legislation_rule, dpv_elements, odrl_elements)
 
-    def _extract_dpv_elements(self, legislation_rule: LegislationRule) -> Dict[str, Any]:
-        """Extract DPV elements from legislation rule with dynamic action and decision mapping."""
+    def _extract_dpv_elements_with_combined_actions(self, legislation_rule: LegislationRule) -> Dict[str, Any]:
+        """Extract DPV elements from legislation rule with combined action mapping."""
 
         dpv_personal_data = []
         for category in legislation_rule.data_category:
@@ -168,13 +181,25 @@ class StandardsConverter:
                 elif primary_role_value == "processor":
                     processor = self.dpv_concepts.ROLES["processor"]
 
-        # Dynamic rule actions mapping
+        # Combined actions mapping (replaces separate rule and user actions)
+        dpv_combined_actions = []
+        
+        # Process rule actions as organizational
+        for action in legislation_rule.actions:
+            action_uri = self.dpv_concepts.get_combined_action_uri(action.action_type, "organizational")
+            dpv_combined_actions.append(action_uri)
+
+        # Process user actions as individual
+        for action in legislation_rule.user_actions:
+            action_uri = self.dpv_concepts.get_combined_action_uri(action.action_type, "individual")
+            dpv_combined_actions.append(action_uri)
+
+        # Backwards compatibility - separate action lists (deprecated)
         dpv_rule_actions = []
         for action in legislation_rule.actions:
             action_uri = self.dpv_concepts.get_action_uri(action.action_type, is_user_action=False)
             dpv_rule_actions.append(action_uri)
 
-        # Dynamic user actions mapping
         dpv_user_actions = []
         for action in legislation_rule.user_actions:
             action_uri = self.dpv_concepts.get_action_uri(action.action_type, is_user_action=True)
@@ -209,8 +234,12 @@ class StandardsConverter:
             "hasDataController": controller,
             "hasDataProcessor": processor,
             "hasLocation": dpv_locations,
+            # New combined actions
+            "hasCombinedAction": dpv_combined_actions,
+            # Backwards compatibility (deprecated)
             "hasRuleAction": dpv_rule_actions,
             "hasUserAction": dpv_user_actions,
+            # Decisions
             "hasDecision": dpv_decisions,
             "hasDecisionOutcome": dpv_decision_outcomes
         }
@@ -422,8 +451,8 @@ class StandardsConverter:
         }
         return mapping.get(operator, "eq")
 
-    def _create_integrated_rule(self, legislation_rule: LegislationRule, dpv_elements: Dict[str, Any], odrl_elements: Dict[str, Any]) -> IntegratedRule:
-        """Create integrated rule with decision support."""
+    def _create_integrated_rule_with_combined_actions(self, legislation_rule: LegislationRule, dpv_elements: Dict[str, Any], odrl_elements: Dict[str, Any]) -> IntegratedRule:
+        """Create integrated rule with combined actions and decision support."""
 
         source_levels = []
         chunk_refs = []
@@ -443,13 +472,25 @@ class StandardsConverter:
             dpv_hasDataController=dpv_elements.get("hasDataController"),
             dpv_hasDataProcessor=dpv_elements.get("hasDataProcessor"),
             dpv_hasLocation=dpv_elements.get("hasLocation", []),
+            
+            # New combined actions field
+            dpv_hasAction=dpv_elements.get("hasCombinedAction", []),
+            
+            # Backwards compatibility (deprecated)
             dpv_hasRuleAction=dpv_elements.get("hasRuleAction", []),
             dpv_hasUserAction=dpv_elements.get("hasUserAction", []),
+            
+            # Decisions
             dpv_hasDecision=dpv_elements.get("hasDecision", []),
             dpv_hasDecisionOutcome=dpv_elements.get("hasDecisionOutcome", []),
+            
             odrl_permission=odrl_elements.get("permission", []),
             odrl_prohibition=odrl_elements.get("prohibition", []),
             odrl_obligation=odrl_elements.get("obligation", []),
+            
+            # ODRE properties with updated enforcement mode
+            odre_enforcement_mode="combined_action_based",
+            
             source_document_levels=source_levels,
             chunk_references=chunk_refs,
             source_legislation=legislation_rule.source_file,
@@ -458,8 +499,11 @@ class StandardsConverter:
         )
 
     def integrated_to_json_rules(self, integrated_rule: IntegratedRule) -> Dict[str, Any]:
-        """Convert integrated rule back to JSON rules format (if needed) with decision support."""
-        # Implementation for reverse conversion with decisions
+        """Convert integrated rule back to JSON rules format (if needed) with combined actions support."""
+        
+        # Get combined actions (either from new field or backwards compatibility)
+        combined_actions = integrated_rule.get_combined_actions()
+        
         return {
             "id": integrated_rule.id.replace("integrated:", ""),
             "source_legislation": integrated_rule.source_legislation,
@@ -468,8 +512,12 @@ class StandardsConverter:
                 "processing": integrated_rule.dpv_hasProcessing,
                 "purpose": integrated_rule.dpv_hasPurpose,
                 "personal_data": integrated_rule.dpv_hasPersonalData,
+                # Combined actions
+                "actions": combined_actions,
+                # Backwards compatibility
                 "rule_actions": integrated_rule.dpv_hasRuleAction,
                 "user_actions": integrated_rule.dpv_hasUserAction,
+                # Decisions
                 "decisions": integrated_rule.dpv_hasDecision,
                 "decision_outcomes": integrated_rule.dpv_hasDecisionOutcome
             },

@@ -1,6 +1,6 @@
 """
 Rule models and extraction results for the legislation rules converter.
-Enhanced with decision-making capabilities and complete RDF/JSON-LD generation.
+Enhanced with proper RDF schema generation and combined actions structure.
 """
 import json
 import os
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 try:
     import rdflib
     from rdflib import Graph, Namespace, URIRef, Literal, BNode
-    from rdflib.namespace import RDF, RDFS, XSD
+    from rdflib.namespace import RDF, RDFS, XSD, OWL
     RDF_AVAILABLE = True
 except ImportError:
     RDF_AVAILABLE = False
@@ -191,21 +191,20 @@ class ExtractionResult(BaseModel):
             return
 
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        turtle_content = self._generate_turtle_with_rdflib()
+        turtle_content = self._generate_turtle_with_proper_schema()
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(turtle_content)
 
     def save_integrated_jsonld(self, filepath: str):
         """Save integrated rules in JSON-LD format."""
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        jsonld_content = self._generate_jsonld()
+        jsonld_content = self._generate_jsonld_with_proper_schema()
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(jsonld_content, f, indent=2, ensure_ascii=False)
 
     def save_csv(self, filepath: str):
-        """Save extraction results to a comprehensive CSV file with decision support and robust error handling."""
+        """Save extraction results to a comprehensive CSV file with combined actions."""
         try:
-            # Ensure directory exists
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
             print(f"   Attempting to save CSV to: {filepath}")
@@ -213,13 +212,12 @@ class ExtractionResult(BaseModel):
 
             if not self.rules:
                 print(f"   Warning: No rules to save to CSV")
-                # Create empty CSV with headers
                 with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
                     fieldnames = [
                         'id', 'rule_name', 'rule_description', 'primary_impacted_role', 
                         'secondary_impacted_role', 'data_category', 'applicable_countries', 
                         'adequacy_countries', 'conditions_logic_type', 'count_of_conditions', 
-                        'details_of_conditions', 'rule_actions', 'user_actions', 'decisions',
+                        'details_of_conditions', 'combined_actions', 'decisions',
                         'decision_outcomes', 'source_article', 'source_file'
                     ]
                     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -232,7 +230,7 @@ class ExtractionResult(BaseModel):
                     'id', 'rule_name', 'rule_description', 'primary_impacted_role', 
                     'secondary_impacted_role', 'data_category', 'applicable_countries', 
                     'adequacy_countries', 'conditions_logic_type', 'count_of_conditions', 
-                    'details_of_conditions', 'rule_actions', 'user_actions', 'decisions',
+                    'details_of_conditions', 'combined_actions', 'decisions',
                     'decision_outcomes', 'source_article', 'source_file'
                 ]
 
@@ -242,20 +240,14 @@ class ExtractionResult(BaseModel):
                 saved_count = 0
                 for rule in self.rules:
                     try:
-                        # Handle enum values and lists safely with individual error handling
+                        # Handle enum values and lists safely
                         primary_role = ''
                         if rule.primary_impacted_role:
-                            try:
-                                primary_role = rule.primary_impacted_role.value if hasattr(rule.primary_impacted_role, 'value') else str(rule.primary_impacted_role)
-                            except:
-                                primary_role = str(rule.primary_impacted_role)
+                            primary_role = rule.primary_impacted_role.value if hasattr(rule.primary_impacted_role, 'value') else str(rule.primary_impacted_role)
 
                         secondary_role = ''
                         if rule.secondary_impacted_role:
-                            try:
-                                secondary_role = rule.secondary_impacted_role.value if hasattr(rule.secondary_impacted_role, 'value') else str(rule.secondary_impacted_role)
-                            except:
-                                secondary_role = str(rule.secondary_impacted_role)
+                            secondary_role = rule.secondary_impacted_role.value if hasattr(rule.secondary_impacted_role, 'value') else str(rule.secondary_impacted_role)
 
                         data_cats = ''
                         try:
@@ -263,7 +255,7 @@ class ExtractionResult(BaseModel):
                         except Exception as e:
                             data_cats = f"Error processing data categories: {e}"
 
-                        # Process conditions with comprehensive error handling
+                        # Process conditions
                         conditions_logic = ''
                         total_conditions = 0
                         conditions_detail_text = ''
@@ -272,7 +264,6 @@ class ExtractionResult(BaseModel):
                             conditions_logic = '; '.join(rule.conditions.keys())
                             total_conditions = sum(len(conditions) for conditions in rule.conditions.values())
 
-                            # Create detailed conditions description
                             condition_details = []
                             for logic_type, conditions in rule.conditions.items():
                                 for i, condition in enumerate(conditions, 1):
@@ -298,37 +289,32 @@ class ExtractionResult(BaseModel):
                         except Exception as e:
                             conditions_detail_text = f"Error processing conditions: {e}"
 
-                        # Process rule actions with error handling
-                        rule_actions_text = 'None'
+                        # Process COMBINED actions (rule actions + user actions)
+                        combined_actions_text = 'None'
                         try:
-                            rule_action_details = []
+                            all_action_details = []
+                            
+                            # Add rule actions with [ORGANIZATIONAL] prefix
                             for action in rule.actions:
                                 try:
-                                    detail = f"[{action.action_type}] {action.title}: {action.description} (Priority: {action.priority}, Confidence: {action.confidence_score:.2f})"
-                                    rule_action_details.append(detail)
+                                    detail = f"[ORGANIZATIONAL] [{action.action_type}] {action.title}: {action.description} (Priority: {action.priority}, Confidence: {action.confidence_score:.2f})"
+                                    all_action_details.append(detail)
                                 except Exception as e:
-                                    rule_action_details.append(f"Error processing action: {e}")
+                                    all_action_details.append(f"[ORGANIZATIONAL] Error processing action: {e}")
 
-                            rule_actions_text = ' | '.join(rule_action_details) if rule_action_details else 'None'
-                        except Exception as e:
-                            rule_actions_text = f"Error processing rule actions: {e}"
-
-                        # Process user actions with error handling
-                        user_actions_text = 'None'
-                        try:
-                            user_action_details = []
+                            # Add user actions with [INDIVIDUAL] prefix
                             for action in rule.user_actions:
                                 try:
-                                    detail = f"[{action.action_type}] {action.title}: {action.description} (Priority: {action.priority}, Confidence: {action.confidence_score:.2f})"
-                                    user_action_details.append(detail)
+                                    detail = f"[INDIVIDUAL] [{action.action_type}] {action.title}: {action.description} (Priority: {action.priority}, Confidence: {action.confidence_score:.2f})"
+                                    all_action_details.append(detail)
                                 except Exception as e:
-                                    user_action_details.append(f"Error processing user action: {e}")
+                                    all_action_details.append(f"[INDIVIDUAL] Error processing user action: {e}")
 
-                            user_actions_text = ' | '.join(user_action_details) if user_action_details else 'None'
+                            combined_actions_text = ' | '.join(all_action_details) if all_action_details else 'None'
                         except Exception as e:
-                            user_actions_text = f"Error processing user actions: {e}"
+                            combined_actions_text = f"Error processing combined actions: {e}"
 
-                        # Process decisions with error handling
+                        # Process decisions
                         decisions_text = 'None'
                         decision_outcomes_text = 'None'
                         try:
@@ -357,7 +343,7 @@ class ExtractionResult(BaseModel):
                             decisions_text = f"Error processing decisions: {e}"
                             decision_outcomes_text = f"Error processing decision outcomes: {e}"
 
-                        # Create row with error handling for each field
+                        # Create row
                         row = {
                             'id': str(rule.id),
                             'rule_name': str(rule.name),
@@ -370,8 +356,7 @@ class ExtractionResult(BaseModel):
                             'conditions_logic_type': conditions_logic,
                             'count_of_conditions': total_conditions,
                             'details_of_conditions': conditions_detail_text,
-                            'rule_actions': rule_actions_text,
-                            'user_actions': user_actions_text,
+                            'combined_actions': combined_actions_text,  # Combined actions instead of separate
                             'decisions': decisions_text,
                             'decision_outcomes': decision_outcomes_text,
                             'source_article': str(rule.source_article),
@@ -382,20 +367,17 @@ class ExtractionResult(BaseModel):
 
                     except Exception as e:
                         logger.error(f"Error processing rule {rule.id} for CSV: {e}")
-                        print(f"   Error processing rule {rule.id}: {e}")
                         continue
 
-            print(f"   CSV Rules with Dual Actions and Decisions saved: {filepath}")
+            print(f"   CSV Rules with Combined Actions saved: {filepath}")
             print(f"   Successfully saved {saved_count} out of {len(self.rules)} rules to CSV")
 
         except Exception as e:
             logger.error(f"Error saving CSV file: {e}")
             print(f"   Error saving CSV file: {e}")
-            import traceback
-            traceback.print_exc()
 
-    def _generate_turtle_with_rdflib(self) -> str:
-        """Generate Turtle RDF representation with complete rule information, decision trees, and decisions."""
+    def _generate_turtle_with_proper_schema(self) -> str:
+        """Generate Turtle RDF representation with proper ontology schema definitions."""
         if not RDF_AVAILABLE:
             return "# Error: rdflib not available for TTL generation"
 
@@ -403,13 +385,16 @@ class ExtractionResult(BaseModel):
 
         g = Graph()
 
-        # Define namespaces with updated v2.1 URIs
+        # Define namespaces
         DPV = Namespace(Config.DPV_NAMESPACE)
         DPV_PD = Namespace(Config.DPV_PD_NAMESPACE)
         DPV_ACTION = Namespace(Config.ACTION_NAMESPACE)
         ODRL = Namespace(Config.ODRL_NAMESPACE)
         ODRE = Namespace("https://w3id.org/def/odre#")
         RULES = Namespace("https://w3id.org/legislation-rules#")
+        
+        # Define instance namespace (different from class namespace)
+        INSTANCES = Namespace("https://w3id.org/legislation-rules/instances#")
 
         # Bind namespaces
         g.bind("dpv", DPV)
@@ -418,16 +403,21 @@ class ExtractionResult(BaseModel):
         g.bind("odrl", ODRL)
         g.bind("odre", ODRE)
         g.bind("rules", RULES)
+        g.bind("instances", INSTANCES)
         g.bind("rdf", RDF)
         g.bind("rdfs", RDFS)
         g.bind("xsd", XSD)
+        g.bind("owl", OWL)
 
-        # Process both original rules and integrated rules for complete coverage
+        # First, define the ontology schema with proper class definitions
+        self._add_ontology_schema(g, RULES, DPV, ODRL, ODRE)
+
+        # Process rules as instances
         for rule in self.rules:
-            rule_id_encoded = urllib.parse.quote(rule.id, safe=':/')
-            rule_uri = URIRef(f"urn:rule:{rule_id_encoded}")
+            rule_id_encoded = urllib.parse.quote(rule.id, safe='')
+            rule_uri = URIRef(f"{INSTANCES}{rule_id_encoded}")
 
-            # Core rule information
+            # Core rule information with proper typing
             g.add((rule_uri, RDF.type, RULES.LegislationRule))
             g.add((rule_uri, RDFS.label, Literal(rule.name)))
             g.add((rule_uri, RULES.description, Literal(rule.description)))
@@ -457,105 +447,51 @@ class ExtractionResult(BaseModel):
             for country in rule.adequacy_countries:
                 g.add((rule_uri, RULES.adequacyCountry, Literal(country)))
 
-            # Conditions with full decision tree logic
-            for logic_type, conditions in rule.conditions.items():
-                # Create a decision tree node for each logic type
-                logic_uri = URIRef(f"urn:rule:{rule_id_encoded}:logic:{logic_type}")
-                g.add((rule_uri, RULES.hasDecisionLogic, logic_uri))
-                g.add((logic_uri, RDF.type, RULES.DecisionLogic))
-                g.add((logic_uri, RULES.logicType, Literal(logic_type)))
+            # Combined Actions (instead of separate rule_actions and user_actions)
+            all_actions = []
+            
+            # Add rule actions with organizational type
+            for action in rule.actions:
+                all_actions.append(('organizational', action))
+            
+            # Add user actions with individual type  
+            for action in rule.user_actions:
+                all_actions.append(('individual', action))
 
-                for i, condition in enumerate(conditions):
-                    condition_uri = URIRef(f"urn:rule:{rule_id_encoded}:condition:{logic_type}:{i}")
-                    g.add((logic_uri, RULES.hasCondition, condition_uri))
-                    g.add((condition_uri, RDF.type, RULES.RuleCondition))
-                    g.add((condition_uri, RULES.fact, Literal(condition.fact)))
-
-                    operator_val = condition.operator.value if hasattr(condition.operator, 'value') else str(condition.operator)
-                    g.add((condition_uri, RULES.operator, Literal(operator_val)))
-                    g.add((condition_uri, RULES.value, Literal(str(condition.value))))
-                    g.add((condition_uri, RULES.description, Literal(condition.description)))
-                    g.add((condition_uri, RULES.reasoning, Literal(condition.reasoning)))
-
-                    if condition.role:
-                        role_val = condition.role.value if hasattr(condition.role, 'value') else str(condition.role)
-                        g.add((condition_uri, RULES.role, Literal(role_val)))
-
-                    # Data domains
-                    for domain in condition.data_domain:
-                        domain_val = domain.value if hasattr(domain, 'value') else str(domain)
-                        g.add((condition_uri, RULES.dataDomain, Literal(domain_val)))
-
-                    # Document metadata
-                    level_val = condition.document_level.value if hasattr(condition.document_level, 'value') else str(condition.document_level)
-                    g.add((condition_uri, RULES.documentLevel, Literal(level_val)))
-
-                    if condition.chunk_reference:
-                        g.add((condition_uri, RULES.chunkReference, Literal(condition.chunk_reference)))
-
-            # Rule Actions
-            for i, action in enumerate(rule.actions):
-                action_uri = URIRef(f"urn:rule:{rule_id_encoded}:action:{i}")
-                g.add((rule_uri, RULES.hasRuleAction, action_uri))
-                g.add((action_uri, RDF.type, RULES.RuleAction))
+            # Process combined actions
+            for i, (action_category, action) in enumerate(all_actions):
+                action_uri = URIRef(f"{INSTANCES}{rule_id_encoded}_action_{i}")
+                g.add((rule_uri, RULES.hasAction, action_uri))
+                g.add((action_uri, RDF.type, RULES.Action))
+                g.add((action_uri, RULES.actionCategory, Literal(action_category)))
                 g.add((action_uri, RULES.actionType, Literal(action.action_type)))
                 g.add((action_uri, RULES.title, Literal(action.title)))
                 g.add((action_uri, RULES.description, Literal(action.description)))
                 g.add((action_uri, RULES.priority, Literal(action.priority)))
-                g.add((action_uri, RULES.legislativeRequirement, Literal(action.legislative_requirement)))
-                g.add((action_uri, RULES.dataImpact, Literal(action.data_impact)))
                 g.add((action_uri, RULES.confidenceScore, Literal(action.confidence_score, datatype=XSD.float)))
 
-                # Data specific steps
-                for step in action.data_specific_steps:
-                    g.add((action_uri, RULES.dataSpecificStep, Literal(step)))
+                # Action-specific properties
+                if hasattr(action, 'data_specific_steps'):
+                    for step in action.data_specific_steps:
+                        g.add((action_uri, RULES.dataSpecificStep, Literal(step)))
+                elif hasattr(action, 'user_data_steps'):
+                    for step in action.user_data_steps:
+                        g.add((action_uri, RULES.userDataStep, Literal(step)))
 
-                # Verification methods
-                for method in action.verification_method:
-                    g.add((action_uri, RULES.verificationMethod, Literal(method)))
+                if hasattr(action, 'legislative_requirement'):
+                    g.add((action_uri, RULES.legislativeRequirement, Literal(action.legislative_requirement)))
 
-                if action.responsible_role:
+                if hasattr(action, 'responsible_role'):
                     g.add((action_uri, RULES.responsibleRole, Literal(action.responsible_role)))
 
-                if action.timeline:
+                if hasattr(action, 'timeline') and action.timeline:
                     g.add((action_uri, RULES.timeline, Literal(action.timeline)))
 
-            # User Actions
-            for i, action in enumerate(rule.user_actions):
-                action_uri = URIRef(f"urn:rule:{rule_id_encoded}:userAction:{i}")
-                g.add((rule_uri, RULES.hasUserAction, action_uri))
-                g.add((action_uri, RDF.type, RULES.UserAction))
-                g.add((action_uri, RULES.actionType, Literal(action.action_type)))
-                g.add((action_uri, RULES.title, Literal(action.title)))
-                g.add((action_uri, RULES.description, Literal(action.description)))
-                g.add((action_uri, RULES.priority, Literal(action.priority)))
-                g.add((action_uri, RULES.legislativeRequirement, Literal(action.legislative_requirement)))
-                g.add((action_uri, RULES.complianceOutcome, Literal(action.compliance_outcome)))
-                g.add((action_uri, RULES.confidenceScore, Literal(action.confidence_score, datatype=XSD.float)))
-
-                # User data steps
-                for step in action.user_data_steps:
-                    g.add((action_uri, RULES.userDataStep, Literal(step)))
-
-                # Affected data categories
-                for category in action.affected_data_categories:
-                    g.add((action_uri, RULES.affectedDataCategory, Literal(category)))
-
-                # User verification steps
-                for step in action.user_verification_steps:
-                    g.add((action_uri, RULES.userVerificationStep, Literal(step)))
-
-                if action.user_role_context:
-                    g.add((action_uri, RULES.userRoleContext, Literal(action.user_role_context)))
-
-                if action.timeline:
-                    g.add((action_uri, RULES.timeline, Literal(action.timeline)))
-
-            # Decisions - New decision support
+            # Decisions
             for i, decision in enumerate(rule.decisions):
-                decision_uri = URIRef(f"urn:rule:{rule_id_encoded}:decision:{i}")
+                decision_uri = URIRef(f"{INSTANCES}{rule_id_encoded}_decision_{i}")
                 g.add((rule_uri, RULES.hasDecision, decision_uri))
-                g.add((decision_uri, RDF.type, RULES.RuleDecision))
+                g.add((decision_uri, RDF.type, RULES.Decision))
                 
                 decision_type_val = decision.decision_type.value if hasattr(decision.decision_type, 'value') else str(decision.decision_type)
                 decision_context_val = decision.decision_context.value if hasattr(decision.decision_context, 'value') else str(decision.decision_context)
@@ -569,89 +505,53 @@ class ExtractionResult(BaseModel):
                 g.add((decision_uri, RULES.confidenceScore, Literal(decision.confidence_score, datatype=XSD.float)))
                 g.add((decision_uri, RULES.crossBorder, Literal(decision.cross_border, datatype=XSD.boolean)))
 
-                # Decision conditions
-                for condition in decision.conditions_for_yes:
-                    g.add((decision_uri, RULES.conditionForYes, Literal(condition)))
-                for condition in decision.conditions_for_no:
-                    g.add((decision_uri, RULES.conditionForNo, Literal(condition)))
-                for condition in decision.conditions_for_maybe:
-                    g.add((decision_uri, RULES.conditionForMaybe, Literal(condition)))
+            # Conditions with proper structure
+            for logic_type, conditions in rule.conditions.items():
+                logic_uri = URIRef(f"{INSTANCES}{rule_id_encoded}_logic_{logic_type}")
+                g.add((rule_uri, RULES.hasConditionLogic, logic_uri))
+                g.add((logic_uri, RDF.type, RULES.ConditionLogic))
+                g.add((logic_uri, RULES.logicType, Literal(logic_type)))
 
-                # Required actions
-                for action in decision.required_actions_for_yes:
-                    g.add((decision_uri, RULES.requiredActionForYes, Literal(action)))
-                for action in decision.required_actions_for_maybe:
-                    g.add((decision_uri, RULES.requiredActionForMaybe, Literal(action)))
-
-                # Decision factors
-                for factor in decision.decision_factors:
-                    g.add((decision_uri, RULES.decisionFactor, Literal(factor)))
-
-                # Applicable contexts
-                for category in decision.applicable_data_categories:
-                    g.add((decision_uri, RULES.applicableDataCategory, Literal(category)))
-                for role in decision.applicable_roles:
-                    g.add((decision_uri, RULES.applicableRole, Literal(role)))
-
-                if decision.source_jurisdiction:
-                    g.add((decision_uri, RULES.sourceJurisdiction, Literal(decision.source_jurisdiction)))
-                if decision.target_jurisdiction:
-                    g.add((decision_uri, RULES.targetJurisdiction, Literal(decision.target_jurisdiction)))
-
-            # Event information
-            g.add((rule_uri, RULES.eventType, Literal(rule.event.type)))
+                for i, condition in enumerate(conditions):
+                    condition_uri = URIRef(f"{INSTANCES}{rule_id_encoded}_condition_{logic_type}_{i}")
+                    g.add((logic_uri, RULES.hasCondition, condition_uri))
+                    g.add((condition_uri, RDF.type, RULES.Condition))
+                    g.add((condition_uri, RULES.fact, Literal(condition.fact)))
+                    
+                    operator_val = condition.operator.value if hasattr(condition.operator, 'value') else str(condition.operator)
+                    g.add((condition_uri, RULES.operator, Literal(operator_val)))
+                    g.add((condition_uri, RULES.value, Literal(str(condition.value))))
+                    g.add((condition_uri, RULES.description, Literal(condition.description)))
 
             # Metadata
             g.add((rule_uri, RULES.extractedAt, Literal(rule.extracted_at.isoformat(), datatype=XSD.dateTime)))
             g.add((rule_uri, RULES.extractionMethod, Literal(rule.extraction_method)))
 
-        # Add integrated rules for semantic web properties
+        # Add integrated rules with combined actions
         for integrated_rule in self.integrated_rules:
-            rule_id_encoded = urllib.parse.quote(integrated_rule.id, safe=':/')
-            rule_uri = URIRef(f"urn:rule:{rule_id_encoded}")
+            rule_id_encoded = urllib.parse.quote(integrated_rule.id, safe='')
+            integrated_uri = URIRef(f"{INSTANCES}integrated_{rule_id_encoded}")
 
             # ODRE Properties
-            g.add((rule_uri, RDF.type, ODRE.EnforceablePolicy))
-            g.add((rule_uri, RDF.type, DPV.ProcessingActivity))
-            g.add((rule_uri, ODRE.enforceable, Literal(integrated_rule.odre_enforceable, datatype=XSD.boolean)))
-            g.add((rule_uri, ODRE.enforcement_mode, Literal(integrated_rule.odre_enforcement_mode)))
-            g.add((rule_uri, ODRE.action_inference, Literal(integrated_rule.odre_action_inference, datatype=XSD.boolean)))
-            g.add((rule_uri, ODRE.user_action_inference, Literal(integrated_rule.odre_user_action_inference, datatype=XSD.boolean)))
-            g.add((rule_uri, ODRE.decision_inference, Literal(integrated_rule.odre_decision_inference, datatype=XSD.boolean)))
+            g.add((integrated_uri, RDF.type, RULES.IntegratedRule))
+            g.add((integrated_uri, RDF.type, ODRE.EnforceablePolicy))
+            g.add((integrated_uri, ODRE.enforceable, Literal(integrated_rule.odre_enforceable, datatype=XSD.boolean)))
+            g.add((integrated_uri, ODRE.enforcementMode, Literal(integrated_rule.odre_enforcement_mode)))
+
+            # Combined DPV Actions (instead of separate hasRuleAction and hasUserAction)
+            combined_dpv_actions = (integrated_rule.dpv_hasRuleAction or []) + (integrated_rule.dpv_hasUserAction or [])
+            for action_uri in combined_dpv_actions:
+                g.add((integrated_uri, RULES.hasDPVAction, URIRef(action_uri)))
 
             # DPV Properties
-            for processing in integrated_rule.dpv_hasProcessing:
-                g.add((rule_uri, DPV.hasProcessing, URIRef(processing)))
+            for processing in (integrated_rule.dpv_hasProcessing or []):
+                g.add((integrated_uri, DPV.hasProcessing, URIRef(processing)))
 
-            for purpose in integrated_rule.dpv_hasPurpose:
-                g.add((rule_uri, DPV.hasPurpose, URIRef(purpose)))
+            for purpose in (integrated_rule.dpv_hasPurpose or []):
+                g.add((integrated_uri, DPV.hasPurpose, URIRef(purpose)))
 
-            for data in integrated_rule.dpv_hasPersonalData:
-                g.add((rule_uri, DPV.hasPersonalData, URIRef(data)))
-
-            # Rule actions
-            for action in integrated_rule.dpv_hasRuleAction:
-                g.add((rule_uri, DPV_ACTION.hasRuleAction, URIRef(action)))
-
-            # User actions
-            for action in integrated_rule.dpv_hasUserAction:
-                g.add((rule_uri, DPV_ACTION.hasUserAction, URIRef(action)))
-
-            # Decisions
-            for decision in integrated_rule.dpv_hasDecision:
-                g.add((rule_uri, DPV_ACTION.hasDecision, URIRef(decision)))
-
-            for outcome in integrated_rule.dpv_hasDecisionOutcome:
-                g.add((rule_uri, DPV_ACTION.hasDecisionOutcome, URIRef(outcome)))
-
-            if integrated_rule.dpv_hasDataController:
-                g.add((rule_uri, DPV.hasDataController, URIRef(integrated_rule.dpv_hasDataController)))
-
-            if integrated_rule.dpv_hasDataProcessor:
-                g.add((rule_uri, DPV.hasDataProcessor, URIRef(integrated_rule.dpv_hasDataProcessor)))
-
-            for location in integrated_rule.dpv_hasLocation:
-                g.add((rule_uri, DPV.hasLocation, URIRef(location)))
+            for data in (integrated_rule.dpv_hasPersonalData or []):
+                g.add((integrated_uri, DPV.hasPersonalData, URIRef(data)))
 
         # Serialize to Turtle format
         turtle_output = g.serialize(format='turtle')
@@ -659,8 +559,113 @@ class ExtractionResult(BaseModel):
             return turtle_output.decode('utf-8')
         return turtle_output
 
-    def _generate_jsonld(self) -> Dict[str, Any]:
-        """Generate JSON-LD representation with complete rule information, decision trees, and decisions."""
+    def _add_ontology_schema(self, graph, RULES, DPV, ODRL, ODRE):
+        """Add proper ontology class definitions to the graph."""
+        
+        # Define the ontology itself
+        graph.add((RULES[''], RDF.type, OWL.Ontology))
+        graph.add((RULES[''], RDFS.label, Literal("Legislation Rules Ontology")))
+        graph.add((RULES[''], RDFS.comment, Literal("An ontology for representing legislation rules with combined actions and decision support")))
+
+        # Core Classes
+        graph.add((RULES.LegislationRule, RDF.type, OWL.Class))
+        graph.add((RULES.LegislationRule, RDFS.label, Literal("Legislation Rule")))
+        graph.add((RULES.LegislationRule, RDFS.comment, Literal("A rule extracted from legislation")))
+
+        graph.add((RULES.Action, RDF.type, OWL.Class))
+        graph.add((RULES.Action, RDFS.label, Literal("Action")))
+        graph.add((RULES.Action, RDFS.comment, Literal("An action that can be organizational or individual")))
+
+        graph.add((RULES.Decision, RDF.type, OWL.Class))
+        graph.add((RULES.Decision, RDFS.label, Literal("Decision")))
+        graph.add((RULES.Decision, RDFS.comment, Literal("A decision with yes/no/maybe outcomes")))
+
+        graph.add((RULES.Condition, RDF.type, OWL.Class))
+        graph.add((RULES.Condition, RDFS.label, Literal("Condition")))
+        graph.add((RULES.Condition, RDFS.comment, Literal("A condition that must be evaluated")))
+
+        graph.add((RULES.ConditionLogic, RDF.type, OWL.Class))
+        graph.add((RULES.ConditionLogic, RDFS.label, Literal("Condition Logic")))
+        graph.add((RULES.ConditionLogic, RDFS.comment, Literal("Logic container for conditions (all/any/not)")))
+
+        graph.add((RULES.IntegratedRule, RDF.type, OWL.Class))
+        graph.add((RULES.IntegratedRule, RDFS.label, Literal("Integrated Rule")))
+        graph.add((RULES.IntegratedRule, RDFS.comment, Literal("A rule integrated with DPV, ODRL, and ODRE standards")))
+
+        # Object Properties
+        graph.add((RULES.hasAction, RDF.type, OWL.ObjectProperty))
+        graph.add((RULES.hasAction, RDFS.label, Literal("has action")))
+        graph.add((RULES.hasAction, RDFS.domain, RULES.LegislationRule))
+        graph.add((RULES.hasAction, RDFS.range, RULES.Action))
+
+        graph.add((RULES.hasDecision, RDF.type, OWL.ObjectProperty))
+        graph.add((RULES.hasDecision, RDFS.label, Literal("has decision")))
+        graph.add((RULES.hasDecision, RDFS.domain, RULES.LegislationRule))
+        graph.add((RULES.hasDecision, RDFS.range, RULES.Decision))
+
+        graph.add((RULES.hasConditionLogic, RDF.type, OWL.ObjectProperty))
+        graph.add((RULES.hasConditionLogic, RDFS.label, Literal("has condition logic")))
+        graph.add((RULES.hasConditionLogic, RDFS.domain, RULES.LegislationRule))
+        graph.add((RULES.hasConditionLogic, RDFS.range, RULES.ConditionLogic))
+
+        graph.add((RULES.hasCondition, RDF.type, OWL.ObjectProperty))
+        graph.add((RULES.hasCondition, RDFS.label, Literal("has condition")))
+        graph.add((RULES.hasCondition, RDFS.domain, RULES.ConditionLogic))
+        graph.add((RULES.hasCondition, RDFS.range, RULES.Condition))
+
+        graph.add((RULES.hasDPVAction, RDF.type, OWL.ObjectProperty))
+        graph.add((RULES.hasDPVAction, RDFS.label, Literal("has DPV action")))
+        graph.add((RULES.hasDPVAction, RDFS.comment, Literal("Links to DPV action concepts (combines rule and user actions)")))
+
+        # Data Properties
+        graph.add((RULES.actionCategory, RDF.type, OWL.DatatypeProperty))
+        graph.add((RULES.actionCategory, RDFS.label, Literal("action category")))
+        graph.add((RULES.actionCategory, RDFS.comment, Literal("Category of action: organizational or individual")))
+        graph.add((RULES.actionCategory, RDFS.domain, RULES.Action))
+        graph.add((RULES.actionCategory, RDFS.range, XSD.string))
+
+        graph.add((RULES.actionType, RDF.type, OWL.DatatypeProperty))
+        graph.add((RULES.actionType, RDFS.label, Literal("action type")))
+        graph.add((RULES.actionType, RDFS.domain, RULES.Action))
+        graph.add((RULES.actionType, RDFS.range, XSD.string))
+
+        graph.add((RULES.title, RDF.type, OWL.DatatypeProperty))
+        graph.add((RULES.title, RDFS.label, Literal("title")))
+        graph.add((RULES.title, RDFS.range, XSD.string))
+
+        graph.add((RULES.description, RDF.type, OWL.DatatypeProperty))
+        graph.add((RULES.description, RDFS.label, Literal("description")))
+        graph.add((RULES.description, RDFS.range, XSD.string))
+
+        graph.add((RULES.priority, RDF.type, OWL.DatatypeProperty))
+        graph.add((RULES.priority, RDFS.label, Literal("priority")))
+        graph.add((RULES.priority, RDFS.range, XSD.string))
+
+        graph.add((RULES.confidenceScore, RDF.type, OWL.DatatypeProperty))
+        graph.add((RULES.confidenceScore, RDFS.label, Literal("confidence score")))
+        graph.add((RULES.confidenceScore, RDFS.range, XSD.float))
+
+        graph.add((RULES.decisionType, RDF.type, OWL.DatatypeProperty))
+        graph.add((RULES.decisionType, RDFS.label, Literal("decision type")))
+        graph.add((RULES.decisionType, RDFS.domain, RULES.Decision))
+        graph.add((RULES.decisionType, RDFS.range, XSD.string))
+
+        graph.add((RULES.outcome, RDF.type, OWL.DatatypeProperty))
+        graph.add((RULES.outcome, RDFS.label, Literal("outcome")))
+        graph.add((RULES.outcome, RDFS.domain, RULES.Decision))
+        graph.add((RULES.outcome, RDFS.range, XSD.string))
+
+        # Additional properties
+        for prop_name in ['sourceArticle', 'sourceFile', 'scenario', 'rationale', 'fact', 'operator', 'value', 
+                         'logicType', 'extractedAt', 'extractionMethod', 'primaryImpactedRole', 'dataCategory',
+                         'applicableCountry', 'adequacyCountry', 'legislativeRequirement', 'responsibleRole',
+                         'timeline', 'dataSpecificStep', 'userDataStep']:
+            prop_uri = getattr(RULES, prop_name)
+            graph.add((prop_uri, RDF.type, OWL.DatatypeProperty))
+            graph.add((prop_uri, RDFS.label, Literal(prop_name.lower().replace('_', ' '))))
+
+    def _generate_jsonld_with_proper_schema(self) -> Dict[str, Any]:
+        """Generate JSON-LD representation with proper schema and combined actions."""
         from ..config import Config
         
         context = {
@@ -671,18 +676,20 @@ class ExtractionResult(BaseModel):
                 "odrl": Config.ODRL_NAMESPACE,
                 "odre": "https://w3id.org/def/odre#",
                 "rules": "https://w3id.org/legislation-rules#",
+                "instances": "https://w3id.org/legislation-rules/instances#",
                 "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
                 "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
-                "xsd": "http://www.w3.org/2001/XMLSchema#"
+                "xsd": "http://www.w3.org/2001/XMLSchema#",
+                "owl": "http://www.w3.org/2002/07/owl#"
             }
         }
 
         graph = []
 
-        # Process all original rules with complete information including decisions
+        # Process all original rules with combined actions
         for rule in self.rules:
             rule_jsonld = {
-                "@id": f"urn:rule:{rule.id}",
+                "@id": f"instances:{rule.id}",
                 "@type": "rules:LegislationRule",
                 "rdfs:label": rule.name,
                 "rules:description": rule.description,
@@ -722,131 +729,82 @@ class ExtractionResult(BaseModel):
             if rule.adequacy_countries:
                 rule_jsonld["rules:adequacyCountry"] = rule.adequacy_countries
 
-            # Decision Logic and Conditions
-            decision_logic = []
-            for logic_type, condition_list in rule.conditions.items():
-                logic_obj = {
-                    "@type": "rules:DecisionLogic",
-                    "rules:logicType": logic_type,
-                    "rules:hasCondition": []
-                }
-
-                for i, condition in enumerate(condition_list):
-                    operator_val = condition.operator.value if hasattr(condition.operator, 'value') else str(condition.operator)
-                    role_val = condition.role.value if condition.role and hasattr(condition.role, 'value') else str(condition.role) if condition.role else None
-                    level_val = condition.document_level.value if hasattr(condition.document_level, 'value') else str(condition.document_level)
-
-                    condition_obj = {
-                        "@type": "rules:RuleCondition",
-                        "rules:fact": condition.fact,
-                        "rules:operator": operator_val,
-                        "rules:value": str(condition.value),
-                        "rules:description": condition.description,
-                        "rules:reasoning": condition.reasoning,
-                        "rules:documentLevel": level_val
-                    }
-
-                    if role_val:
-                        condition_obj["rules:role"] = role_val
-
-                    if condition.chunk_reference:
-                        condition_obj["rules:chunkReference"] = condition.chunk_reference
-
-                    # Data domains
-                    domains = []
-                    for domain in condition.data_domain:
-                        domain_val = domain.value if hasattr(domain, 'value') else str(domain)
-                        domains.append(domain_val)
-                    if domains:
-                        condition_obj["rules:dataDomain"] = domains
-
-                    logic_obj["rules:hasCondition"].append(condition_obj)
-
-                decision_logic.append(logic_obj)
-
-            if decision_logic:
-                rule_jsonld["rules:hasDecisionLogic"] = decision_logic
-
-            # Rule Actions
-            rule_actions = []
-            for action in rule.actions:
+            # Combined Actions (instead of separate rule_actions and user_actions)
+            combined_actions = []
+            
+            # Add rule actions with organizational category
+            for i, action in enumerate(rule.actions):
                 action_obj = {
-                    "@type": "rules:RuleAction",
+                    "@id": f"instances:{rule.id}_action_{len(combined_actions)}",
+                    "@type": "rules:Action",
+                    "rules:actionCategory": "organizational",
                     "rules:actionType": action.action_type,
                     "rules:title": action.title,
                     "rules:description": action.description,
                     "rules:priority": action.priority,
-                    "rules:legislativeRequirement": action.legislative_requirement,
-                    "rules:dataImpact": action.data_impact,
                     "rules:confidenceScore": {
                         "@value": action.confidence_score,
                         "@type": "xsd:float"
                     }
                 }
 
-                if action.data_specific_steps:
+                if hasattr(action, 'data_specific_steps') and action.data_specific_steps:
                     action_obj["rules:dataSpecificStep"] = action.data_specific_steps
 
-                if action.verification_method:
-                    action_obj["rules:verificationMethod"] = action.verification_method
+                if hasattr(action, 'legislative_requirement'):
+                    action_obj["rules:legislativeRequirement"] = action.legislative_requirement
 
-                if action.responsible_role:
+                if hasattr(action, 'responsible_role'):
                     action_obj["rules:responsibleRole"] = action.responsible_role
 
-                if action.timeline:
+                if hasattr(action, 'timeline') and action.timeline:
                     action_obj["rules:timeline"] = action.timeline
 
-                rule_actions.append(action_obj)
+                combined_actions.append(action_obj)
 
-            if rule_actions:
-                rule_jsonld["rules:hasRuleAction"] = rule_actions
-
-            # User Actions
-            user_actions = []
+            # Add user actions with individual category
             for action in rule.user_actions:
                 action_obj = {
-                    "@type": "rules:UserAction",
+                    "@id": f"instances:{rule.id}_action_{len(combined_actions)}",
+                    "@type": "rules:Action", 
+                    "rules:actionCategory": "individual",
                     "rules:actionType": action.action_type,
                     "rules:title": action.title,
                     "rules:description": action.description,
                     "rules:priority": action.priority,
-                    "rules:legislativeRequirement": action.legislative_requirement,
-                    "rules:complianceOutcome": action.compliance_outcome,
                     "rules:confidenceScore": {
                         "@value": action.confidence_score,
                         "@type": "xsd:float"
                     }
                 }
 
-                if action.user_data_steps:
+                if hasattr(action, 'user_data_steps') and action.user_data_steps:
                     action_obj["rules:userDataStep"] = action.user_data_steps
 
-                if action.affected_data_categories:
-                    action_obj["rules:affectedDataCategory"] = action.affected_data_categories
+                if hasattr(action, 'legislative_requirement'):
+                    action_obj["rules:legislativeRequirement"] = action.legislative_requirement
 
-                if action.user_verification_steps:
-                    action_obj["rules:userVerificationStep"] = action.user_verification_steps
-
-                if action.user_role_context:
+                if hasattr(action, 'user_role_context'):
                     action_obj["rules:userRoleContext"] = action.user_role_context
 
-                if action.timeline:
+                if hasattr(action, 'timeline') and action.timeline:
                     action_obj["rules:timeline"] = action.timeline
 
-                user_actions.append(action_obj)
+                combined_actions.append(action_obj)
 
-            if user_actions:
-                rule_jsonld["rules:hasUserAction"] = user_actions
+            if combined_actions:
+                rule_jsonld["rules:hasAction"] = combined_actions
 
-            # Decisions - New decision support
+            # Decisions
             decisions = []
-            for decision in rule.decisions:
+            for i, decision in enumerate(rule.decisions):
                 decision_type_val = decision.decision_type.value if hasattr(decision.decision_type, 'value') else str(decision.decision_type)
                 decision_context_val = decision.decision_context.value if hasattr(decision.decision_context, 'value') else str(decision.decision_context)
                 outcome_val = decision.outcome.value if hasattr(decision.outcome, 'value') else str(decision.outcome)
                 
                 decision_obj = {
-                    "@type": "rules:RuleDecision",
+                    "@id": f"instances:{rule.id}_decision_{i}",
+                    "@type": "rules:Decision",
                     "rules:decisionType": decision_type_val,
                     "rules:decisionContext": decision_context_val,
                     "rules:outcome": outcome_val,
@@ -855,8 +813,7 @@ class ExtractionResult(BaseModel):
                     "rules:confidenceScore": {
                         "@value": decision.confidence_score,
                         "@type": "xsd:float"
-                    },
-                    "rules:crossBorder": decision.cross_border
+                    }
                 }
 
                 if decision.conditions_for_yes:
@@ -866,31 +823,39 @@ class ExtractionResult(BaseModel):
                 if decision.conditions_for_maybe:
                     decision_obj["rules:conditionForMaybe"] = decision.conditions_for_maybe
 
-                if decision.required_actions_for_yes:
-                    decision_obj["rules:requiredActionForYes"] = decision.required_actions_for_yes
-                if decision.required_actions_for_maybe:
-                    decision_obj["rules:requiredActionForMaybe"] = decision.required_actions_for_maybe
-
-                if decision.decision_factors:
-                    decision_obj["rules:decisionFactor"] = decision.decision_factors
-
-                if decision.applicable_data_categories:
-                    decision_obj["rules:applicableDataCategory"] = decision.applicable_data_categories
-                if decision.applicable_roles:
-                    decision_obj["rules:applicableRole"] = decision.applicable_roles
-
-                if decision.source_jurisdiction:
-                    decision_obj["rules:sourceJurisdiction"] = decision.source_jurisdiction
-                if decision.target_jurisdiction:
-                    decision_obj["rules:targetJurisdiction"] = decision.target_jurisdiction
-
                 decisions.append(decision_obj)
 
             if decisions:
                 rule_jsonld["rules:hasDecision"] = decisions
 
-            # Event information
-            rule_jsonld["rules:eventType"] = rule.event.type
+            # Conditions
+            condition_logic = []
+            for logic_type, condition_list in rule.conditions.items():
+                logic_obj = {
+                    "@id": f"instances:{rule.id}_logic_{logic_type}",
+                    "@type": "rules:ConditionLogic",
+                    "rules:logicType": logic_type,
+                    "rules:hasCondition": []
+                }
+
+                for i, condition in enumerate(condition_list):
+                    operator_val = condition.operator.value if hasattr(condition.operator, 'value') else str(condition.operator)
+                    
+                    condition_obj = {
+                        "@id": f"instances:{rule.id}_condition_{logic_type}_{i}",
+                        "@type": "rules:Condition",
+                        "rules:fact": condition.fact,
+                        "rules:operator": operator_val,
+                        "rules:value": str(condition.value),
+                        "rules:description": condition.description
+                    }
+
+                    logic_obj["rules:hasCondition"].append(condition_obj)
+
+                condition_logic.append(logic_obj)
+
+            if condition_logic:
+                rule_jsonld["rules:hasConditionLogic"] = condition_logic
 
             # Metadata
             rule_jsonld["rules:extractedAt"] = {
@@ -901,72 +866,43 @@ class ExtractionResult(BaseModel):
 
             graph.append(rule_jsonld)
 
-        # Add integrated rules for semantic web properties
+        # Add integrated rules with combined DPV actions
         for integrated_rule in self.integrated_rules:
-            # Find the corresponding original rule
-            original_rule_id = integrated_rule.id.replace("integrated:", "")
-
             integrated_jsonld = {
-                "@id": f"urn:rule:{integrated_rule.id}",
-                "@type": ["odre:EnforceablePolicy", "dpv:ProcessingActivity"],
+                "@id": f"instances:integrated_{integrated_rule.id}",
+                "@type": ["rules:IntegratedRule", "odre:EnforceablePolicy"],
                 "rdfs:label": integrated_rule.source_article,
 
                 # ODRE Properties
                 "odre:enforceable": integrated_rule.odre_enforceable,
-                "odre:enforcement_mode": integrated_rule.odre_enforcement_mode,
-                "odre:action_inference": integrated_rule.odre_action_inference,
-                "odre:user_action_inference": integrated_rule.odre_user_action_inference,
-                "odre:decision_inference": integrated_rule.odre_decision_inference,
+                "odre:enforcementMode": integrated_rule.odre_enforcement_mode,
+
+                # Combined DPV Actions (instead of separate hasRuleAction and hasUserAction)
+                "rules:hasDPVAction": [{"@id": uri} for uri in 
+                                      (integrated_rule.dpv_hasRuleAction or []) + 
+                                      (integrated_rule.dpv_hasUserAction or [])],
 
                 # DPV Properties
-                "dpv:hasProcessing": [{"@id": uri} for uri in integrated_rule.dpv_hasProcessing],
-                "dpv:hasPurpose": [{"@id": uri} for uri in integrated_rule.dpv_hasPurpose],
-                "dpv:hasPersonalData": [{"@id": uri} for uri in integrated_rule.dpv_hasPersonalData],
-                "dpv:hasLocation": [{"@id": uri} for uri in integrated_rule.dpv_hasLocation],
-                "dpv-action:hasRuleAction": [{"@id": uri} for uri in integrated_rule.dpv_hasRuleAction],
-                "dpv-action:hasUserAction": [{"@id": uri} for uri in integrated_rule.dpv_hasUserAction],
-                "dpv-action:hasDecision": [{"@id": uri} for uri in integrated_rule.dpv_hasDecision],
-                "dpv-action:hasDecisionOutcome": [{"@id": uri} for uri in integrated_rule.dpv_hasDecisionOutcome],
-                "dpv-action:hasDocumentLevel": integrated_rule.source_document_levels,
-                "dpv-action:hasChunkReference": integrated_rule.chunk_references,
+                "dpv:hasProcessing": [{"@id": uri} for uri in (integrated_rule.dpv_hasProcessing or [])],
+                "dpv:hasPurpose": [{"@id": uri} for uri in (integrated_rule.dpv_hasPurpose or [])],
+                "dpv:hasPersonalData": [{"@id": uri} for uri in (integrated_rule.dpv_hasPersonalData or [])],
+                "dpv:hasLocation": [{"@id": uri} for uri in (integrated_rule.dpv_hasLocation or [])],
 
                 # ODRL Properties
                 "odrl:permission": integrated_rule.odrl_permission,
                 "odrl:prohibition": integrated_rule.odrl_prohibition,
                 "odrl:obligation": integrated_rule.odrl_obligation,
-                "odrl:hasPermissionCount": {
-                    "@value": len(integrated_rule.odrl_permission),
-                    "@type": "xsd:integer"
-                },
-                "odrl:hasProhibitionCount": {
-                    "@value": len(integrated_rule.odrl_prohibition),
-                    "@type": "xsd:integer"
-                },
-                "odrl:hasObligationCount": {
-                    "@value": len(integrated_rule.odrl_obligation),
-                    "@type": "xsd:integer"
-                },
-
-                # Link to original rule
-                "rules:originalRule": {"@id": f"urn:rule:{original_rule_id}"},
 
                 # Metadata
-                "dpv:hasConfidenceScore": {
+                "rules:confidenceScore": {
                     "@value": integrated_rule.confidence_score,
                     "@type": "xsd:float"
                 },
-                "dpv:extractedAt": {
+                "rules:extractedAt": {
                     "@value": integrated_rule.extracted_at.isoformat(),
                     "@type": "xsd:dateTime"
-                },
-                "dpv:sourceLegislation": integrated_rule.source_legislation
+                }
             }
-
-            # Optional properties
-            if integrated_rule.dpv_hasDataController:
-                integrated_jsonld["dpv:hasDataController"] = {"@id": integrated_rule.dpv_hasDataController}
-            if integrated_rule.dpv_hasDataProcessor:
-                integrated_jsonld["dpv:hasDataProcessor"] = {"@id": integrated_rule.dpv_hasDataProcessor}
 
             graph.append(integrated_jsonld)
 
