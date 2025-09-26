@@ -1,0 +1,30 @@
+{
+  "rules": [
+    {
+      "id": "instances:combined_actions_test_rule_1",
+      "title": "",
+      "description": "",
+      "source_article": "",
+      "source_file": "",
+      "confidence_score": 0.0,
+      "primary_impacted_role": "unknown",
+      "data_categories": [],
+      "processing_purposes": ["general_processing"],
+      "applicable_countries": [],
+      "adequacy_countries": [],
+      "extracted_at": "",
+      "extraction_method": "",
+      "actions": [],
+      "condition_logic": null,
+      "tags": ["legislation"],
+      "legal_basis": [],
+      "risk_level": "medium"
+    }
+  ],
+  "metadata": {
+    "total_rules": 1,
+    "conversion_timestamp": "2025-09-26T10:22:19.297403",
+    "format_version": "2.0",
+    "query_optimized": true
+  }
+}

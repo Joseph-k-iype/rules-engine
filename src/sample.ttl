@@ -1,0 +1,286 @@
+@prefix dpv: <https://w3id.org/dpv#> .
+@prefix dpv-action: <https://w3id.org/dpv/actions#> .
+@prefix dpv-pd: <https://w3id.org/dpv/dpv-pd#> .
+@prefix instances: <https://w3id.org/legislation-rules/instances#> .
+@prefix odre: <https://w3id.org/def/odre#> .
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rules: <https://w3id.org/legislation-rules#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# ===================================================================
+# ONTOLOGY SCHEMA DEFINITIONS (This is what was missing before!)
+# ===================================================================
+
+rules: a owl:Ontology ;
+    rdfs:label "Legislation Rules Ontology" ;
+    rdfs:comment "An ontology for representing legislation rules with combined actions and decision support" .
+
+# Core Classes (Proper OWL class definitions)
+rules:LegislationRule a owl:Class ;
+    rdfs:label "Legislation Rule" ;
+    rdfs:comment "A rule extracted from legislation" .
+
+rules:Action a owl:Class ;
+    rdfs:label "Action" ;
+    rdfs:comment "An action that can be organizational or individual" .
+
+rules:Decision a owl:Class ;
+    rdfs:label "Decision" ;
+    rdfs:comment "A decision with yes/no/maybe outcomes" .
+
+rules:Condition a owl:Class ;
+    rdfs:label "Condition" ;
+    rdfs:comment "A condition that must be evaluated" .
+
+rules:ConditionLogic a owl:Class ;
+    rdfs:label "Condition Logic" ;
+    rdfs:comment "Logic container for conditions (all/any/not)" .
+
+rules:IntegratedRule a owl:Class ;
+    rdfs:label "Integrated Rule" ;
+    rdfs:comment "A rule integrated with DPV, ODRL, and ODRE standards" .
+
+# Object Properties
+rules:hasAction a owl:ObjectProperty ;
+    rdfs:label "has action" ;
+    rdfs:domain rules:LegislationRule ;
+    rdfs:range rules:Action .
+
+rules:hasDecision a owl:ObjectProperty ;
+    rdfs:label "has decision" ;
+    rdfs:domain rules:LegislationRule ;
+    rdfs:range rules:Decision .
+
+rules:hasConditionLogic a owl:ObjectProperty ;
+    rdfs:label "has condition logic" ;
+    rdfs:domain rules:LegislationRule ;
+    rdfs:range rules:ConditionLogic .
+
+rules:hasCondition a owl:ObjectProperty ;
+    rdfs:label "has condition" ;
+    rdfs:domain rules:ConditionLogic ;
+    rdfs:range rules:Condition .
+
+rules:hasDPVAction a owl:ObjectProperty ;
+    rdfs:label "has DPV action" ;
+    rdfs:comment "Links to DPV action concepts (combines rule and user actions)" .
+
+# Data Properties
+rules:actionCategory a owl:DatatypeProperty ;
+    rdfs:label "action category" ;
+    rdfs:comment "Category of action: organizational or individual" ;
+    rdfs:domain rules:Action ;
+    rdfs:range xsd:string .
+
+rules:actionType a owl:DatatypeProperty ;
+    rdfs:label "action type" ;
+    rdfs:domain rules:Action ;
+    rdfs:range xsd:string .
+
+rules:title a owl:DatatypeProperty ;
+    rdfs:label "title" ;
+    rdfs:range xsd:string .
+
+rules:description a owl:DatatypeProperty ;
+    rdfs:label "description" ;
+    rdfs:range xsd:string .
+
+rules:priority a owl:DatatypeProperty ;
+    rdfs:label "priority" ;
+    rdfs:range xsd:string .
+
+rules:confidenceScore a owl:DatatypeProperty ;
+    rdfs:label "confidence score" ;
+    rdfs:range xsd:float .
+
+rules:decisionType a owl:DatatypeProperty ;
+    rdfs:label "decision type" ;
+    rdfs:domain rules:Decision ;
+    rdfs:range xsd:string .
+
+rules:outcome a owl:DatatypeProperty ;
+    rdfs:label "outcome" ;
+    rdfs:domain rules:Decision ;
+    rdfs:range xsd:string .
+
+rules:sourceArticle a owl:DatatypeProperty ;
+    rdfs:label "source article" ;
+    rdfs:range xsd:string .
+
+rules:sourceFile a owl:DatatypeProperty ;
+    rdfs:label "source file" ;
+    rdfs:range xsd:string .
+
+rules:scenario a owl:DatatypeProperty ;
+    rdfs:label "scenario" ;
+    rdfs:range xsd:string .
+
+rules:rationale a owl:DatatypeProperty ;
+    rdfs:label "rationale" ;
+    rdfs:range xsd:string .
+
+rules:fact a owl:DatatypeProperty ;
+    rdfs:label "fact" ;
+    rdfs:range xsd:string .
+
+rules:operator a owl:DatatypeProperty ;
+    rdfs:label "operator" ;
+    rdfs:range xsd:string .
+
+rules:value a owl:DatatypeProperty ;
+    rdfs:label "value" ;
+    rdfs:range xsd:string .
+
+rules:logicType a owl:DatatypeProperty ;
+    rdfs:label "logic type" ;
+    rdfs:range xsd:string .
+
+rules:extractedAt a owl:DatatypeProperty ;
+    rdfs:label "extracted at" ;
+    rdfs:range xsd:dateTime .
+
+rules:extractionMethod a owl:DatatypeProperty ;
+    rdfs:label "extraction method" ;
+    rdfs:range xsd:string .
+
+rules:primaryImpactedRole a owl:DatatypeProperty ;
+    rdfs:label "primary impacted role" ;
+    rdfs:range xsd:string .
+
+rules:dataCategory a owl:DatatypeProperty ;
+    rdfs:label "data category" ;
+    rdfs:range xsd:string .
+
+rules:applicableCountry a owl:DatatypeProperty ;
+    rdfs:label "applicable country" ;
+    rdfs:range xsd:string .
+
+rules:adequacyCountry a owl:DatatypeProperty ;
+    rdfs:label "adequacy country" ;
+    rdfs:range xsd:string .
+
+rules:legislativeRequirement a owl:DatatypeProperty ;
+    rdfs:label "legislative requirement" ;
+    rdfs:range xsd:string .
+
+rules:responsibleRole a owl:DatatypeProperty ;
+    rdfs:label "responsible role" ;
+    rdfs:range xsd:string .
+
+rules:timeline a owl:DatatypeProperty ;
+    rdfs:label "timeline" ;
+    rdfs:range xsd:string .
+
+rules:dataSpecificStep a owl:DatatypeProperty ;
+    rdfs:label "data specific step" ;
+    rdfs:range xsd:string .
+
+rules:userDataStep a owl:DatatypeProperty ;
+    rdfs:label "user data step" ;
+    rdfs:range xsd:string .
+
+# ===================================================================
+# RULE INSTANCES (Using proper namespace instead of urn: URIs)
+# ===================================================================
+
+instances:combined_actions_test_rule_1 a rules:LegislationRule ;
+    rdfs:label "Cross-Border Data Transfer Compliance" ;
+    rules:description "Requirements for cross-border data transfers with combined organizational and individual actions" ;
+    rules:sourceArticle "Article 44-49 GDPR" ;
+    rules:sourceFile "gdpr_transfer_rules.pdf" ;
+    rules:priority 1 ;
+    rules:confidenceScore 0.85 ;
+    rules:primaryImpactedRole "controller" ;
+    rules:dataCategory "personal_data", "identification_data" ;
+    rules:applicableCountry "EU", "EEA", "UK" ;
+    rules:adequacyCountry "Switzerland", "Canada" ;
+    rules:extractedAt "2024-01-15T10:30:00Z"^^xsd:dateTime ;
+    rules:extractionMethod "llm_analysis_with_inferred_actions_and_decisions" ;
+    
+    # Combined Actions (NEW STRUCTURE - No more separate rule_actions/user_actions!)
+    rules:hasAction instances:combined_actions_test_rule_1_action_0,
+                    instances:combined_actions_test_rule_1_action_1 ;
+    
+    # Condition Logic
+    rules:hasConditionLogic instances:combined_actions_test_rule_1_logic_all .
+
+# COMBINED ACTION 1: ORGANIZATIONAL
+instances:combined_actions_test_rule_1_action_0 a rules:Action ;
+    rules:actionCategory "organizational" ;  # NEW: Distinguishes org vs individual
+    rules:actionType "implement_adequacy_safeguards" ;
+    rules:title "Implement Cross-Border Data Transfer Safeguards" ;
+    rules:description "Organizations must implement adequate safeguards for cross-border data transfers" ;
+    rules:priority "high" ;
+    rules:confidenceScore 0.9 ;
+    rules:responsibleRole "controller" ;
+    rules:legislativeRequirement "Article 46 GDPR requires adequate safeguards for transfers to third countries" ;
+    rules:timeline "Within 30 days of identifying transfer requirement" ;
+    rules:dataSpecificStep "Assess adequacy status of destination country",
+                          "Implement Standard Contractual Clauses if needed",
+                          "Conduct Transfer Impact Assessment",
+                          "Document transfer procedures" .
+
+# COMBINED ACTION 2: INDIVIDUAL  
+instances:combined_actions_test_rule_1_action_1 a rules:Action ;
+    rules:actionCategory "individual" ;  # NEW: Distinguishes org vs individual
+    rules:actionType "verify_data_transfer_consent" ;
+    rules:title "Verify Consent for Data Transfers" ;
+    rules:description "Individuals should verify their consent preferences for cross-border data transfers" ;
+    rules:priority "medium" ;
+    rules:confidenceScore 0.8 ;
+    rules:legislativeRequirement "Article 7 GDPR provides rights regarding consent for data processing" ;
+    rules:timeline "Ongoing monitoring recommended" ;
+    rules:userDataStep "Check privacy settings in online accounts",
+                       "Review consent preferences for data transfers",
+                       "Update preferences if needed",
+                       "Monitor transfer notifications" .
+
+# Condition Logic
+instances:combined_actions_test_rule_1_logic_all a rules:ConditionLogic ;
+    rules:logicType "all" ;
+    rules:hasCondition instances:combined_actions_test_rule_1_condition_all_0 .
+
+instances:combined_actions_test_rule_1_condition_all_0 a rules:Condition ;
+    rules:fact "data_processing_activity" ;
+    rules:operator "equal" ;
+    rules:value "cross_border_transfer" ;
+    rules:description "When processing involves cross-border data transfer" .
+
+# ===================================================================
+# INTEGRATED RULE WITH DPV/ODRL/ODRE INTEGRATION
+# ===================================================================
+
+instances:integrated_combined_actions_test_rule_1 a rules:IntegratedRule,
+                                                     odre:EnforceablePolicy ;
+    rdfs:label "Article 44-49 GDPR" ;
+    
+    # ODRE Properties
+    odre:enforceable true ;
+    odre:enforcementMode "combined_action_based" ;  # NEW: Updated for combined actions
+    
+    # Combined DPV Actions (NEW: Single property instead of separate hasRuleAction/hasUserAction)
+    rules:hasDPVAction dpv-action:OrganizationalImplementAdequacySafeguards,
+                       dpv-action:IndividualVerifyDataTransferConsent ;
+    
+    # DPV Properties
+    dpv:hasProcessing dpv:Transfer, dpv:Use ;
+    dpv:hasPurpose dpv:LegalObligation ;
+    dpv:hasPersonalData dpv:PersonalData, dpv-pd:Identifying ;
+    dpv:hasLocation dpv:Country_EU, dpv:Country_EEA, dpv:Country_UK ;
+    
+    # ODRL Properties
+    odrl:permission [
+        odrl:target "gdpr_transfer_rules.pdf:combined_actions_test_rule_1" ;
+        odrl:action "transfer" ;
+        odrl:constraint [
+            odrl:leftOperand "adequacy_safeguards" ;
+            odrl:operator "eq" ;
+            odrl:rightOperand "implemented"
+        ]
+    ] ;
+    
+    rules:confidenceScore 0.85 ;
+    rules:extractedAt "2024-01-15T10:30:00Z"^^xsd:dateTime .
