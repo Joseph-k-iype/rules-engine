@@ -515,3 +515,708 @@ class PromptingStrategies:
 
         Example response: ["personal_data", "sensitive_data"]
         """
+
+@staticmethod
+def odrl_comprehensive_guidance_analysis(
+    guidance_text: str,
+    rule_name: str,
+    framework_type: str,
+    restriction_condition: str
+) -> str:
+    """
+    Stage 1: Comprehensive analysis of guidance text for ODRL extraction.
+    Similar to comprehensive_document_analysis_prompt but focused on ODRL requirements.
+    """
+    return f"""
+    You are a legal and data protection expert analyzing regulatory guidance for ODRL policy creation.
+    
+    RULE CONTEXT:
+    - Rule Name: {rule_name}
+    - Framework: {framework_type}
+    - Type: {restriction_condition}
+    
+    GUIDANCE TEXT TO ANALYZE (READ COMPLETELY):
+    {guidance_text}
+    
+    COMPREHENSIVE ANALYSIS REQUIREMENTS:
+    
+    1. OVERALL UNDERSTANDING:
+       - What is the main objective of this rule?
+       - What problem or risk does it address?
+       - What is the scope of applicability (who, what, when, where)?
+       - Are there any exceptions or exemptions?
+    
+    2. IDENTIFY KEY OBLIGATIONS:
+       - What MUST be done (mandatory actions)?
+       - What MUST NOT be done (prohibitions)?
+       - What SHOULD be done (recommendations)?
+       - What CAN be done (permissions with conditions)?
+    
+    3. IDENTIFY CONDITIONS AND CONSTRAINTS:
+       - Under what circumstances does this apply?
+       - What are the limitations or restrictions?
+       - Are there temporal constraints (time limits, deadlines, durations)?
+       - Are there spatial constraints (geographic, jurisdictional)?
+       - Are there quantitative constraints (limits, thresholds)?
+       - Are there qualitative constraints (purpose, context, recipient type)?
+    
+    4. IDENTIFY DATA ASPECTS:
+       - What types of data are involved?
+       - Who does the data concern (data subjects)?
+       - What operations can be performed on the data?
+       - Are there special data categories requiring enhanced protection?
+    
+    5. IDENTIFY PARTIES AND ROLES:
+       - Who is responsible for compliance (assigner)?
+       - Who is affected by this rule (assignee)?
+       - Are there controllers, processors, joint controllers?
+       - Are data subjects mentioned as active parties?
+       - Are there third parties involved?
+    
+    6. IDENTIFY EVIDENCE AND VERIFICATION:
+       - What evidence is needed to demonstrate compliance?
+       - How can compliance be verified or audited?
+       - What documentation must be maintained?
+       - What records are required?
+    
+    7. IDENTIFY PURPOSES AND LEGAL BASIS:
+       - What is the stated purpose of data processing?
+       - What legal basis is mentioned or implied?
+       - Are there purpose limitations?
+    
+    CRITICAL REQUIREMENTS:
+    - Provide a comprehensive, structured analysis in clear English
+    - Focus on extracting actionable, machine-readable information
+    - Be precise and base EVERYTHING on the actual guidance text
+    - Do not infer beyond what is directly stated or clearly implied
+    - Identify ambiguities or areas requiring clarification
+    - Use simple, clear language without legal jargon
+    
+    Your analysis should enable precise ODRL policy creation in subsequent stages.
+    """
+
+
+@staticmethod
+def odrl_component_extraction(
+    guidance_text: str,
+    rule_name: str,
+    initial_analysis: str
+) -> str:
+    """
+    Stage 2: Extract ODRL-specific components (permissions, prohibitions, duties, constraints).
+    Follows the focused_analysis_prompt pattern with ODRL terminology.
+    """
+    return f"""
+    Based on the guidance text and comprehensive analysis, extract ODRL policy components.
+    
+    RULE: {rule_name}
+    
+    INITIAL COMPREHENSIVE ANALYSIS:
+    {initial_analysis}
+    
+    ORIGINAL GUIDANCE TEXT (reference as needed):
+    {guidance_text}
+    
+    ODRL COMPONENT EXTRACTION:
+    
+    Extract information using ODRL terminology and structure:
+    
+    1. ACTIONS (use ODRL standard actions where possible):
+       Standard ODRL actions: use, transfer, distribute, reproduce, modify, delete, 
+       read, write, execute, play, display, print, stream, sell, give, lend, share, 
+       derive, annotate, archive
+       
+       Custom actions: collect, store, process, anonymize, pseudonymize, profile, etc.
+       
+       - What specific actions are mentioned in the guidance?
+       - Use standard ODRL action vocabulary when applicable
+       - Define custom actions when standard ones don't fit
+    
+    2. PERMISSIONS (what is ALLOWED):
+       - What actions are explicitly permitted?
+       - Under what conditions are they permitted?
+       - Are there duties that must be fulfilled to exercise the permission?
+       - Who grants the permission (assigner)?
+       - Who receives the permission (assignee)?
+       - What asset/target does the permission apply to?
+       
+       Structure each permission with:
+       - Action(s) permitted
+       - Target (what the action applies to)
+       - Constraints (conditions that must be met)
+       - Duties (obligations for exercising the permission)
+       - Parties (assigner, assignee)
+    
+    3. PROHIBITIONS (what is FORBIDDEN):
+       - What actions are explicitly prohibited?
+       - Under what circumstances are they prohibited?
+       - Are there exceptions to the prohibitions?
+       - Who sets the prohibition (assigner)?
+       - Who is subject to the prohibition (assignee)?
+       - What asset/target does the prohibition apply to?
+       
+       Structure each prohibition with:
+       - Action(s) prohibited
+       - Target (what the action applies to)
+       - Constraints (conditions under which prohibition applies)
+       - Parties (assigner, assignee)
+    
+    4. CONSTRAINTS (conditions on permissions/prohibitions):
+       Types of constraints to identify:
+       
+       a) TEMPORAL CONSTRAINTS:
+          - dateTime: specific date/time
+          - delayPeriod: delay before action
+          - elapsedTime: time since event
+          - timeInterval: recurring time period
+       
+       b) SPATIAL CONSTRAINTS:
+          - spatial: geographic location
+          - jurisdiction: legal jurisdiction
+       
+       c) QUANTITATIVE CONSTRAINTS:
+          - count: number of times/items
+          - percentage: percentage limit
+          - fileSize: size limit
+       
+       d) QUALITATIVE CONSTRAINTS:
+          - purpose: intended use
+          - industry: industry sector
+          - recipient: type of recipient
+          - deliveryChannel: method of delivery
+       
+       For each constraint, identify:
+       - leftOperand (what is being constrained)
+       - operator (eq, neq, gt, lt, gteq, lteq, isPartOf, etc.)
+       - rightOperand (the value/condition)
+    
+    5. DUTIES AND OBLIGATIONS:
+       - What must be done BEFORE an action can be performed (pre-conditions)?
+       - What must be done AFTER an action is performed (post-conditions)?
+       - What ongoing obligations exist?
+       - How are duties linked to permissions?
+       
+       Examples: provide attribution, obtain consent, compensate, notify, 
+       delete after use, report usage, etc.
+    
+    6. PARTIES AND ROLES:
+       - Assigner: entity that grants permission or sets prohibition
+       - Assignee: entity that receives permission or is subject to prohibition
+       - Controller: determines purposes and means of processing
+       - Processor: processes data on behalf of controller
+       - Data Subject: individual whose data is processed
+       - Third Party: any other relevant party
+       
+       Identify specific parties mentioned in guidance or role types.
+    
+    CRITICAL EXTRACTION REQUIREMENTS:
+    - Extract ONLY what is explicitly stated in the guidance text
+    - Use ODRL standard terminology precisely
+    - Provide specific references to guidance text for each extraction
+    - If information is ambiguous, note the ambiguity
+    - Focus on creating machine-readable, structured output
+    - Maintain clear distinction between permissions and prohibitions
+    - Link constraints to the specific rules they affect
+    
+    Provide detailed extraction with specific text references to support each component.
+    """
+
+
+@staticmethod
+def odrl_constraint_analysis(
+    guidance_text: str,
+    rule_name: str,
+    odrl_extraction: str
+) -> str:
+    """
+    Stage 3: Detailed constraint analysis with ODRL-compliant structure.
+    Similar to expert_verification_prompt but specialized for constraints.
+    """
+    return f"""
+    Perform detailed constraint analysis for ODRL policy creation.
+    
+    RULE: {rule_name}
+    
+    ODRL COMPONENT EXTRACTION:
+    {odrl_extraction}
+    
+    ORIGINAL GUIDANCE TEXT (verify against):
+    {guidance_text}
+    
+    DETAILED CONSTRAINT ANALYSIS:
+    
+    For EACH constraint identified in the ODRL extraction, create a precise,
+    machine-readable structure following ODRL 2.2 specification:
+    
+    1. CONSTRAINT TYPE CLASSIFICATION:
+       
+       TEMPORAL CONSTRAINTS (time-related):
+       - dateTime: absolute date/time (ISO 8601 format)
+         Example: "must be completed by 2025-12-31T23:59:59Z"
+       - delayPeriod: delay before action (ISO 8601 duration)
+         Example: "wait 30 days after request" → P30D
+       - elapsedTime: time since event (ISO 8601 duration)
+         Example: "within 72 hours of collection" → PT72H
+       - timeInterval: recurring period (ISO 8601)
+         Example: "every 6 months" → R/P6M
+       
+       SPATIAL CONSTRAINTS (location/jurisdiction):
+       - spatial: geographic constraint
+         Example: "only within EU" → leftOperand: spatial, rightOperand: EU
+       - jurisdiction: legal jurisdiction
+         Example: "under GDPR jurisdiction"
+       
+       QUANTITATIVE CONSTRAINTS (numerical):
+       - count: number of times/items
+         Example: "maximum 5 copies" → leftOperand: count, operator: lteq, rightOperand: 5
+       - percentage: percentage constraint
+         Example: "no more than 10%" → leftOperand: percentage, operator: lteq, rightOperand: 10
+       
+       QUALITATIVE CONSTRAINTS (purpose/context):
+       - purpose: intended purpose
+         Example: "only for research" → leftOperand: purpose, operator: eq, rightOperand: research
+       - recipient: type of recipient
+         Example: "only to affiliates" → leftOperand: recipient, operator: isPartOf, rightOperand: affiliates
+    
+    2. CONSTRAINT STRUCTURE (ODRL format):
+       For each constraint, provide:
+       
+       {{
+         "leftOperand": "ODRL left operand URI or custom operand",
+         "operator": "eq|neq|gt|lt|gteq|lteq|isPartOf|isA|isAllOf|isAnyOf|isNoneOf",
+         "rightOperand": "value (string, number, URI, or list)",
+         "description": "clear explanation of constraint in simple English",
+         "scope": "permission|prohibition|duty - what rule this constraint applies to"
+       }}
+       
+       CRITICAL: Each component must be precise and machine-readable
+    
+    3. CONSTRAINT OPERATORS (use correctly):
+       - eq (equal): exact match required
+       - neq (not equal): must not match
+       - gt (greater than): numerical comparison, exclusive
+       - lt (less than): numerical comparison, exclusive
+       - gteq (greater than or equal): numerical comparison, inclusive
+       - lteq (less than or equal): numerical comparison, inclusive
+       - isPartOf: value must be part of specified set/region
+       - isA: value must be instance of specified type
+       - isAllOf: value must match all of specified set
+       - isAnyOf: value must match any of specified set
+       - isNoneOf: value must match none of specified set
+    
+    4. CONSTRAINT SCOPE AND APPLICATION:
+       - Does this constraint apply to a permission, prohibition, or duty?
+       - Is the constraint mandatory (MUST) or optional (SHOULD)?
+       - What happens if the constraint is violated?
+       - Are there any exceptions to the constraint?
+    
+    5. CONSTRAINT RELATIONSHIPS:
+       - Do multiple constraints apply together (AND logic)?
+       - Are constraints alternatives (OR logic)?
+       - Are there hierarchical constraints (constraint on constraint)?
+       - How do constraints interact with each other?
+    
+    EXAMPLES OF WELL-STRUCTURED CONSTRAINTS:
+    
+    Example 1: "Data can only be used for educational purposes"
+    {{
+      "leftOperand": "purpose",
+      "operator": "eq",
+      "rightOperand": "education",
+      "description": "Data usage restricted to educational purposes only",
+      "scope": "permission"
+    }}
+    
+    Example 2: "Processing must occur within the EU"
+    {{
+      "leftOperand": "spatial",
+      "operator": "isPartOf",
+      "rightOperand": "EU",
+      "description": "Data processing limited to European Union territories",
+      "scope": "permission"
+    }}
+    
+    Example 3: "Data must be deleted after 30 days"
+    {{
+      "leftOperand": "elapsedTime",
+      "operator": "gt",
+      "rightOperand": "P30D",
+      "description": "Data retention limited to maximum 30 days",
+      "scope": "duty"
+    }}
+    
+    Example 4: "Transfer prohibited to countries without adequacy decision"
+    {{
+      "leftOperand": "recipient",
+      "operator": "isNoneOf",
+      "rightOperand": ["countries_without_adequacy"],
+      "description": "Data transfer forbidden to jurisdictions lacking adequacy decisions",
+      "scope": "prohibition"
+    }}
+    
+    VERIFICATION REQUIREMENTS:
+    - Verify each constraint against original guidance text
+    - Ensure constraint structure is complete and valid
+    - Confirm operator is appropriate for the operands
+    - Check that rightOperand format matches leftOperand type
+    - Validate that scope correctly identifies affected rule
+    
+    Provide comprehensive constraint analysis with ODRL-compliant structure
+    for ALL constraints identified in the guidance text.
+    """
+
+
+@staticmethod
+def odrl_data_category_identification(
+    guidance_text: str,
+    rule_name: str,
+    constraint_analysis: str
+) -> str:
+    """
+    Stage 4: Comprehensive data category identification.
+    Extends data_category_inference_prompt for ODRL context.
+    """
+    return f"""
+    Identify ALL data categories mentioned or reasonably implied in the guidance.
+    
+    RULE: {rule_name}
+    
+    CONSTRAINT ANALYSIS:
+    {constraint_analysis}
+    
+    ORIGINAL GUIDANCE TEXT:
+    {guidance_text}
+    
+    COMPREHENSIVE DATA CATEGORY IDENTIFICATION:
+    
+    Identify all types of data with precision and completeness:
+    
+    1. GENERAL PERSONAL DATA CATEGORIES:
+       - Personal data (any information relating to identified/identifiable person)
+       - Non-personal data (anonymized, aggregated, non-identifying)
+       - Pseudonymized data (indirectly identifiable with additional information)
+       - Anonymized data (cannot be re-identified)
+    
+    2. SPECIAL CATEGORIES (SENSITIVE DATA) - GDPR Article 9:
+       - Health data (physical/mental health, medical records)
+       - Biometric data (unique identification: fingerprints, facial, iris, voice)
+       - Genetic data (inherited/acquired genetic characteristics)
+       - Racial or ethnic origin data
+       - Political opinions data
+       - Religious or philosophical beliefs data
+       - Trade union membership data
+       - Data concerning sex life or sexual orientation
+       - Criminal conviction and offences data
+    
+    3. SPECIFIC DATA TYPE CATEGORIES:
+       
+       FINANCIAL & ECONOMIC:
+       - Financial data (banking, transactions, assets)
+       - Payment data (credit cards, payment methods)
+       - Credit data (credit history, scores, reports)
+       - Economic data (income, wealth, financial status)
+       
+       LOCATION & MOVEMENT:
+       - Location data (GPS, geolocation, positioning)
+       - Tracking data (movement patterns, travel history)
+       - Geographic data (addresses, coordinates)
+       
+       BEHAVIORAL & PROFILING:
+       - Behavioral data (patterns, preferences, habits)
+       - Profiling data (analyzed characteristics, predictions)
+       - Analytics data (usage patterns, engagement metrics)
+       - Preference data (choices, settings, interests)
+       
+       CONTACT & COMMUNICATION:
+       - Contact data (email, phone, address, social media)
+       - Communication data (messages, emails, call logs)
+       - Correspondence data (letters, communications)
+       
+       IDENTIFICATION & CREDENTIALS:
+       - Identification data (ID numbers, passports, licenses)
+       - Authentication data (passwords, biometrics for auth)
+       - Credential data (certifications, qualifications)
+       
+       TRANSACTIONAL & OPERATIONAL:
+       - Transactional data (purchases, orders, invoices)
+       - Operational data (system logs, operations)
+       - Usage data (service usage, consumption)
+       
+       DEVICE & TECHNICAL:
+       - Device data (IP addresses, device IDs, MAC addresses)
+       - Cookie data (tracking cookies, session data)
+       - Technical data (browser info, OS, device specs)
+       - Log data (access logs, error logs, system logs)
+       
+       DEMOGRAPHIC & SOCIAL:
+       - Demographic data (age, gender, nationality)
+       - Socioeconomic data (education, occupation, income level)
+       - Family data (marital status, dependents)
+       
+       EMPLOYMENT & PROFESSIONAL:
+       - Employment data (job history, employer, position)
+       - Professional data (skills, experience, performance)
+       - HR data (salary, benefits, evaluations)
+       
+       EDUCATIONAL & ACADEMIC:
+       - Educational data (grades, transcripts, courses)
+       - Academic data (research, publications, degrees)
+       - Student data (enrollment, attendance)
+    
+    4. DATA CATEGORIZED BY PURPOSE/USE:
+       - Marketing data (data used for marketing/advertising)
+       - Research data (data used for research purposes)
+       - Statistical data (data used for statistics)
+       - Operational data (data for service operation)
+       - Archival data (historical/archived data)
+       - Training data (data for ML/AI training)
+    
+    5. DATA CATEGORIZED BY STATE:
+       - Active data (currently in use)
+       - Archived data (stored for retention)
+       - Backup data (copies for recovery)
+       - Temporary data (session/cache data)
+    
+    IDENTIFICATION METHODOLOGY:
+    
+    For EACH data category identified:
+    
+    {{
+      "category_name": "Precise category name",
+      "description": "Brief description based on guidance context",
+      "sensitivity_level": "normal|sensitive|highly_sensitive",
+      "evidence": "Exact text from guidance that indicates this category",
+      "reasoning": "Why this category was identified",
+      "confidence": "high|medium|low"
+    }}
+    
+    IDENTIFICATION RULES:
+    
+    - EXPLICIT: Category directly mentioned in text
+    - IMPLICIT: Category reasonably implied by context
+    - DERIVATIVE: Category derived from described operations
+    
+    Examples:
+    - "patient records" → Health Data (EXPLICIT)
+    - "processing for medical research" → Health Data (IMPLICIT)
+    - "DNA analysis" → Genetic Data, Health Data (EXPLICIT + DERIVATIVE)
+    - "location tracking for delivery" → Location Data (EXPLICIT)
+    - "IP address logging" → Device Data, Location Data (EXPLICIT + IMPLICIT)
+    
+    CRITICAL REQUIREMENTS:
+    - Be COMPREHENSIVE - identify ALL categories mentioned or implied
+    - Be PRECISE - use correct category names
+    - Be JUSTIFIED - explain why each category was identified
+    - Be CONSERVATIVE - don't over-infer categories not supported by text
+    - PRIORITIZE explicit mentions over implicit ones
+    - NOTE when multiple categories overlap
+    
+    Provide a complete list of ALL data categories with supporting evidence.
+    """
+
+
+@staticmethod
+def odrl_synthesis_prompt(
+    guidance_text: str,
+    rule_name: str,
+    framework_type: str,
+    restriction_condition: str,
+    initial_analysis: str,
+    odrl_extraction: str,
+    constraint_analysis: str,
+    data_categories: str
+) -> str:
+    """
+    Stage 5: Final synthesis into structured ODRL components.
+    Combines synthesis_prompt_template pattern with ODRL specificity.
+    """
+    return f"""
+    Synthesize all previous analyses into comprehensive, structured ODRL components.
+    
+    RULE CONTEXT:
+    - Rule Name: {rule_name}
+    - Framework: {framework_type}
+    - Type: {restriction_condition}
+    
+    ORIGINAL GUIDANCE TEXT:
+    {guidance_text}
+    
+    ANALYSIS STAGES COMPLETED:
+    
+    STAGE 1 - COMPREHENSIVE ANALYSIS:
+    {initial_analysis}
+    
+    STAGE 2 - ODRL COMPONENT EXTRACTION:
+    {odrl_extraction}
+    
+    STAGE 3 - CONSTRAINT ANALYSIS:
+    {constraint_analysis}
+    
+    STAGE 4 - DATA CATEGORY IDENTIFICATION:
+    {data_categories}
+    
+    SYNTHESIS TASK:
+    
+    Create a COMPLETE, COMPREHENSIVE JSON structure with ALL extracted information:
+    
+    {{
+      "actions": [
+        "list ALL actions identified - use ODRL standard actions where possible",
+        "include both standard (use, transfer, etc.) and custom actions"
+      ],
+      
+      "permissions": [
+        {{
+          "action": "specific ODRL action",
+          "target": "what the action applies to (asset description)",
+          "assigner": "who grants permission (if specified in guidance)",
+          "assignee": "who receives permission (if specified in guidance)",
+          "constraints": [
+            {{
+              "leftOperand": "ODRL left operand",
+              "operator": "ODRL operator (eq, neq, gt, lt, etc.)",
+              "rightOperand": "constraint value",
+              "description": "clear explanation in simple English"
+            }}
+          ],
+          "duties": [
+            "any duties that must be fulfilled to exercise this permission"
+          ],
+          "description": "clear description of this permission in simple English"
+        }}
+      ],
+      
+      "prohibitions": [
+        {{
+          "action": "specific ODRL action",
+          "target": "what the action applies to (asset description)",
+          "assigner": "who sets prohibition (if specified in guidance)",
+          "assignee": "who is prohibited (if specified in guidance)",
+          "constraints": [
+            {{
+              "leftOperand": "ODRL left operand",
+              "operator": "ODRL operator",
+              "rightOperand": "constraint value",
+              "description": "clear explanation in simple English"
+            }}
+          ],
+          "description": "clear description of this prohibition in simple English"
+        }}
+      ],
+      
+      "constraints": [
+        {{
+          "leftOperand": "what is being constrained",
+          "operator": "eq|neq|gt|lt|gteq|lteq|isPartOf|isA|isAllOf|isAnyOf|isNoneOf",
+          "rightOperand": "value or condition (string, number, array, or URI)",
+          "description": "what this constraint means in simple English",
+          "scope": "permission|prohibition|duty"
+        }}
+      ],
+      
+      "data_categories": [
+        "complete list of ALL data categories identified",
+        "use precise category names",
+        "include both explicit and implicit categories"
+      ],
+      
+      "data_subjects": [
+        "who the data is about (individuals, customers, employees, patients, etc.)"
+      ],
+      
+      "parties": {{
+        "assigners": ["who grants permissions or sets prohibitions"],
+        "assignees": ["who receives permissions or is subject to prohibitions"],
+        "controllers": ["data controllers if specified"],
+        "processors": ["data processors if specified"],
+        "third_parties": ["any other relevant parties mentioned"]
+      }},
+      
+      "purpose": "primary purpose of data processing if specified",
+      "legal_basis": "legal basis for processing if specified",
+      "geographic_scope": [
+        "jurisdictions, regions, or countries where this rule applies"
+      ],
+      
+      "evidence_requirements": [
+        "what evidence is needed to demonstrate compliance"
+      ],
+      
+      "verification_methods": [
+        "how compliance can be verified or audited"
+      ],
+      
+      "confidence_score": 0.0-1.0,
+      "extraction_reasoning": "detailed explanation of how you extracted and structured this information, including any assumptions or interpretations made"
+    }}
+    
+    CRITICAL SYNTHESIS REQUIREMENTS:
+    
+    1. COMPLETENESS:
+       - Include EVERY component identified in all analysis stages
+       - Do not omit any permissions, prohibitions, constraints, or data categories
+       - If information is uncertain, include it with lower confidence score
+    
+    2. CONSISTENCY:
+       - Ensure constraints are properly linked to their permissions/prohibitions
+       - Verify parties are consistently identified across components
+       - Check that actions use consistent terminology
+    
+    3. ACCURACY:
+       - Base ALL extractions on actual guidance text
+       - Use exact ODRL terminology for standard components
+       - Provide clear descriptions in simple English for user understanding
+    
+    4. STRUCTURE:
+       - Follow ODRL 2.2 specification precisely
+       - Use correct operators with appropriate operands
+       - Format rightOperand values correctly (strings, numbers, arrays, URIs)
+    
+    5. FRAMEWORK-SPECIFIC LOGIC:
+       - If {restriction_condition} is "restriction":
+         Focus on PROHIBITIONS with clear forbidden actions
+         Permissions should be minimal or conditional
+       
+       - If {restriction_condition} is "condition":
+         Focus on PERMISSIONS with constraints
+         Include all duties required for permissions
+         Prohibitions should be exceptions or edge cases
+    
+    6. MACHINE-READABILITY:
+       - All constraint operators must be valid ODRL operators
+       - All values must be properly formatted for automated processing
+       - Use URIs where standard ODRL vocabulary applies
+    
+    7. HUMAN-READABILITY:
+       - Every permission/prohibition/constraint must have clear description
+       - Use simple, clear English without legal jargon
+       - Descriptions should enable non-experts to understand requirements
+    
+    8. CONFIDENCE SCORING:
+       - 0.9-1.0: Information explicitly stated in guidance
+       - 0.7-0.9: Information clearly implied by guidance
+       - 0.5-0.7: Information reasonably inferred from context
+       - Below 0.5: Uncertain or speculative (include with caveat)
+    
+    9. REASONING:
+       - Explain how each major component was derived
+       - Note any ambiguities in guidance text
+       - Identify gaps where additional clarification would help
+       - Document any assumptions made during synthesis
+    
+    VALIDATION CHECKS BEFORE OUTPUT:
+    ✓ All permissions have valid actions and targets
+    ✓ All prohibitions have valid actions and targets
+    ✓ All constraints have leftOperand, operator, rightOperand
+    ✓ Constraint operators match operand types
+    ✓ Data categories are comprehensive and accurate
+    ✓ Parties are identified where possible
+    ✓ Descriptions are clear and in simple English
+    ✓ Confidence score reflects extraction certainty
+    ✓ Extraction reasoning is detailed and justified
+    
+    RETURN ONLY VALID JSON - NO OTHER TEXT OR MARKDOWN
+    
+    The output must be a single, valid, parseable JSON object following
+    the structure specified above.
+    """
