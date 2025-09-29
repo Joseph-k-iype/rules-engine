@@ -1,0 +1,335 @@
+[
+  {
+    "uuid": "dc-001-personal-data",
+    "name": "Personal Data",
+    "description": "Any information relating to an identified or identifiable natural person ('data subject'). An identifiable natural person is one who can be identified, directly or indirectly, in particular by reference to an identifier such as a name, an identification number, location data, an online identifier or to one or more factors specific to the physical, physiological, genetic, mental, economic, cultural or social identity of that natural person.",
+    "aliases": [
+      "personal information",
+      "PII",
+      "personally identifiable information"
+    ],
+    "parent_category": null,
+    "sensitivity_level": "normal",
+    "examples": [
+      "name",
+      "email address",
+      "phone number",
+      "postal address",
+      "identification number"
+    ],
+    "regulatory_references": [
+      "GDPR Article 4(1)",
+      "CCPA Section 1798.140(o)",
+      "ISO/IEC 29100"
+    ],
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  },
+  {
+    "uuid": "dc-002-sensitive-data",
+    "name": "Sensitive Personal Data",
+    "description": "Special categories of personal data that reveal racial or ethnic origin, political opinions, religious or philosophical beliefs, trade union membership, genetic data, biometric data for uniquely identifying a person, health data, or data concerning a person's sex life or sexual orientation. These categories require enhanced protection and additional safeguards.",
+    "aliases": [
+      "special category data",
+      "sensitive data",
+      "special categories of personal data"
+    ],
+    "parent_category": "dc-001-personal-data",
+    "sensitivity_level": "highly_sensitive",
+    "examples": [
+      "racial or ethnic origin",
+      "political opinions",
+      "religious beliefs",
+      "trade union membership",
+      "genetic data",
+      "biometric data",
+      "health data",
+      "sexual orientation data"
+    ],
+    "regulatory_references": [
+      "GDPR Article 9",
+      "CCPA sensitive personal information"
+    ],
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  },
+  {
+    "uuid": "dc-003-health-data",
+    "name": "Health Data",
+    "description": "Personal data related to the physical or mental health of a natural person, including the provision of health care services, which reveal information about their health status. This includes medical records, health insurance information, prescriptions, diagnoses, treatment plans, and any data processed for healthcare purposes.",
+    "aliases": [
+      "medical data",
+      "healthcare data",
+      "health information",
+      "medical records"
+    ],
+    "parent_category": "dc-002-sensitive-data",
+    "sensitivity_level": "highly_sensitive",
+    "examples": [
+      "medical records",
+      "prescriptions",
+      "health insurance information",
+      "diagnosis",
+      "treatment plans",
+      "lab results",
+      "vaccination records"
+    ],
+    "regulatory_references": [
+      "GDPR Article 9(1)",
+      "HIPAA",
+      "Medical Device Regulation"
+    ],
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  },
+  {
+    "uuid": "dc-004-financial-data",
+    "name": "Financial Data",
+    "description": "Personal data related to financial transactions, accounts, assets, credit history, and economic situation. This includes banking information, payment card details, transaction history, credit scores, and any data that reveals financial status or behavior.",
+    "aliases": [
+      "banking data",
+      "payment data",
+      "financial information",
+      "economic data"
+    ],
+    "parent_category": "dc-001-personal-data",
+    "sensitivity_level": "sensitive",
+    "examples": [
+      "bank account numbers",
+      "credit card numbers",
+      "transaction history",
+      "income information",
+      "credit scores",
+      "investment portfolios"
+    ],
+    "regulatory_references": [
+      "PCI DSS",
+      "GDPR",
+      "GLBA",
+      "PSD2"
+    ],
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  },
+  {
+    "uuid": "dc-005-location-data",
+    "name": "Location Data",
+    "description": "Data about the geographic position of an individual or device, whether current, historical, or derived. This includes precise geolocation from GPS, approximate location from cell towers or Wi-Fi, and any data that can reveal movement patterns or physical presence.",
+    "aliases": [
+      "geolocation data",
+      "GPS data",
+      "tracking data",
+      "positioning data"
+    ],
+    "parent_category": "dc-001-personal-data",
+    "sensitivity_level": "sensitive",
+    "examples": [
+      "GPS coordinates",
+      "IP address geolocation",
+      "cell tower data",
+      "Wi-Fi positioning",
+      "movement patterns",
+      "travel history"
+    ],
+    "regulatory_references": [
+      "GDPR",
+      "ePrivacy Directive",
+      "CCPA"
+    ],
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  },
+  {
+    "uuid": "dc-006-biometric-data",
+    "name": "Biometric Data",
+    "description": "Personal data resulting from specific technical processing relating to the physical, physiological or behavioral characteristics of a natural person, which allow or confirm the unique identification of that person. This includes facial images, fingerprints, iris scans, voice patterns, and gait analysis.",
+    "aliases": [
+      "biometric identifiers",
+      "biometric information"
+    ],
+    "parent_category": "dc-002-sensitive-data",
+    "sensitivity_level": "highly_sensitive",
+    "examples": [
+      "fingerprints",
+      "facial recognition data",
+      "iris scans",
+      "voice prints",
+      "DNA profiles",
+      "handwriting patterns",
+      "gait analysis"
+    ],
+    "regulatory_references": [
+      "GDPR Article 9",
+      "BIPA",
+      "ISO/IEC 24745"
+    ],
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  },
+  {
+    "uuid": "dc-007-behavioral-data",
+    "name": "Behavioral Data",
+    "description": "Data about online and offline behavior patterns, preferences, and characteristics derived from observing or tracking actions. This includes browsing history, purchase patterns, app usage, preferences, and profiling data used for analysis or prediction of behavior.",
+    "aliases": [
+      "usage data",
+      "activity data",
+      "profiling data",
+      "preference data"
+    ],
+    "parent_category": "dc-001-personal-data",
+    "sensitivity_level": "normal",
+    "examples": [
+      "browsing history",
+      "purchase patterns",
+      "app usage statistics",
+      "click streams",
+      "search queries",
+      "viewing preferences",
+      "engagement metrics"
+    ],
+    "regulatory_references": [
+      "GDPR",
+      "ePrivacy Directive",
+      "CCPA"
+    ],
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  },
+  {
+    "uuid": "dc-008-contact-data",
+    "name": "Contact Data",
+    "description": "Data used for communication and contact purposes, including various forms of contact information that enable reaching or identifying an individual for correspondence or interaction.",
+    "aliases": [
+      "contact information",
+      "communication data",
+      "contact details"
+    ],
+    "parent_category": "dc-001-personal-data",
+    "sensitivity_level": "normal",
+    "examples": [
+      "email addresses",
+      "phone numbers",
+      "mailing addresses",
+      "social media handles",
+      "instant messaging IDs"
+    ],
+    "regulatory_references": [
+      "GDPR",
+      "CAN-SPAM Act",
+      "TCPA"
+    ],
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  },
+  {
+    "uuid": "dc-009-identification-data",
+    "name": "Identification Data",
+    "description": "Data used for official identification and verification of identity, including government-issued identifiers and documents that establish or confirm a person's identity. This category is crucial for identity management and verification processes.",
+    "aliases": [
+      "identity data",
+      "ID data",
+      "identification information"
+    ],
+    "parent_category": "dc-001-personal-data",
+    "sensitivity_level": "sensitive",
+    "examples": [
+      "passport numbers",
+      "driver's license numbers",
+      "social security numbers",
+      "national ID numbers",
+      "tax identification numbers",
+      "voter registration numbers"
+    ],
+    "regulatory_references": [
+      "GDPR",
+      "Identity Theft Prevention Act",
+      "eIDAS Regulation"
+    ],
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  },
+  {
+    "uuid": "dc-010-communication-data",
+    "name": "Communication Data",
+    "description": "Content and metadata of communications including messages, emails, calls, and other forms of electronic communication. This includes both the content of communications and associated metadata such as timestamps, participants, and routing information.",
+    "aliases": [
+      "message data",
+      "correspondence data",
+      "communication content"
+    ],
+    "parent_category": "dc-001-personal-data",
+    "sensitivity_level": "sensitive",
+    "examples": [
+      "email content",
+      "text messages",
+      "voice call recordings",
+      "chat logs",
+      "communication metadata",
+      "video call data"
+    ],
+    "regulatory_references": [
+      "GDPR",
+      "ePrivacy Directive",
+      "ECPA",
+      "Wiretap Act"
+    ],
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  },
+  {
+    "uuid": "dc-011-device-data",
+    "name": "Device Data",
+    "description": "Technical data about devices used to access services or systems, including device identifiers, characteristics, and metadata. This data can be used to identify devices, track usage, or enable device-specific functionality.",
+    "aliases": [
+      "device information",
+      "device identifiers",
+      "technical device data"
+    ],
+    "parent_category": "dc-001-personal-data",
+    "sensitivity_level": "normal",
+    "examples": [
+      "IP addresses",
+      "device IDs",
+      "MAC addresses",
+      "cookies",
+      "browser fingerprints",
+      "operating system information",
+      "device specifications"
+    ],
+    "regulatory_references": [
+      "GDPR",
+      "ePrivacy Directive",
+      "CCPA"
+    ],
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  },
+  {
+    "uuid": "dc-012-demographic-data",
+    "name": "Demographic Data",
+    "description": "Statistical data about populations and groups, including characteristics such as age, gender, education, occupation, and family status. Used for analysis, segmentation, and understanding population characteristics.",
+    "aliases": [
+      "demographic information",
+      "population data",
+      "statistical data"
+    ],
+    "parent_category": "dc-001-personal-data",
+    "sensitivity_level": "normal",
+    "examples": [
+      "age",
+      "gender",
+      "occupation",
+      "education level",
+      "marital status",
+      "household composition",
+      "income bracket"
+    ],
+    "regulatory_references": [
+      "GDPR",
+      "CCPA",
+      "Census regulations"
+    ],
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  }
+]
