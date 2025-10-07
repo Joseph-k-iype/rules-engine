@@ -101,7 +101,7 @@ class CSVToODRLConverter:
             return []
         
         # Step 2: Process each entry
-        print(f"\n🔄 Processing {len(entries)} entries...")
+        print(f"\n📝 Processing {len(entries)} entries...")
         print("-"*80)
         
         odrl_policies = []
@@ -145,7 +145,7 @@ class CSVToODRLConverter:
                         await self.data_category_manager.enrich_category_with_llm(cat_name)
                 
                 # Generate ODRL policy
-                print("    🏗️  Generating ODRL policy...")
+                print("    🗂️  Generating ODRL policy...")
                 policy = self.odrl_generator.generate_policy(
                     policy_id=entry.id,
                     rule_name=entry.rule_name,
@@ -162,13 +162,13 @@ class CSVToODRLConverter:
                 if validation['warnings']:
                     print(f"    ⚠️  Warnings: {validation['warnings']}")
                 
-                # Add original CSV data as metadata
+                # Add original CSV data as metadata - NO TRUNCATION
                 policy['custom:originalData'] = {
                     'id': entry.id,
                     'rule_name': entry.rule_name,
                     'framework': entry.rule_framework,
                     'type': entry.restriction_condition,
-                    'guidance_preview': entry.guidance[:200] + "..." if len(entry.guidance) > 200 else entry.guidance
+                    'guidance_text': entry.guidance  # FULL TEXT, NOT TRUNCATED
                 }
                 
                 odrl_policies.append(policy)

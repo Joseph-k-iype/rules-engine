@@ -8,7 +8,7 @@ Location: src/analyzers/guidance_analyzer.py
 import logging
 from typing import Dict, List, Any, Optional
 from langchain_core.messages import SystemMessage, HumanMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from ..services.openai_service import OpenAIService
 from ..utils.json_parser import SafeJsonParser
@@ -209,6 +209,61 @@ class GuidanceAnalyzer:
         
         return response
     
+    def _sanitize_string_list(self, data: Any, field_name: str) -> List[str]:
+        """
+        Sanitize a field that should be a list of strings.
+        Handles cases where LLM returns dicts, instructions, or malformed data.
+        """
+        if not data:
+            return []
+        
+        if not isinstance(data, list):
+            logger.warning(f"{field_name} is not a list, converting: {type(data)}")
+            return []
+        
+        sanitized = []
+        for item in data:
+            if isinstance(item, str):
+                # Skip instruction-like strings
+                if len(item) > 200 or item.lower().startswith(('list all', 'include', 'complete list', 'use precise')):
+                    logger.warning(f"Skipping instruction-like string in {field_name}: {item[:100]}")
+                    continue
+                sanitized.append(item)
+            elif isinstance(item, dict):
+                # Try to extract meaningful string from dict
+                if 'name' in item:
+                    sanitized.append(str(item['name']))
+                elif 'category_name' in item:
+                    sanitized.append(str(item['category_name']))
+                elif 'action' in item:
+                    sanitized.append(str(item['action']))
+                else:
+                    logger.warning(f"Dict in {field_name} has no extractable string: {item}")
+            else:
+                logger.warning(f"Non-string item in {field_name}: {type(item)}")
+        
+        return sanitized
+    
+    def _sanitize_dict_list(self, data: Any, field_name: str) -> List[Dict[str, Any]]:
+        """
+        Sanitize a field that should be a list of dictionaries.
+        """
+        if not data:
+            return []
+        
+        if not isinstance(data, list):
+            logger.warning(f"{field_name} is not a list: {type(data)}")
+            return []
+        
+        sanitized = []
+        for item in data:
+            if isinstance(item, dict):
+                sanitized.append(item)
+            else:
+                logger.warning(f"Non-dict item in {field_name}: {type(item)}")
+        
+        return sanitized
+    
     async def _stage5_synthesis(
         self,
         guidance_text: str,
@@ -234,7 +289,7 @@ class GuidanceAnalyzer:
         )
         
         messages = [
-            SystemMessage(content="You are an expert system for creating ODRL policies. Synthesize complex analyses into precise, machine-readable ODRL structures. Return only valid JSON."),
+            SystemMessage(content="You are an expert system for creating ODRL policies. Synthesize complex analyses into precise, machine-readable ODRL structures. Return only valid JSON with actual extracted data, not template instructions."),
             HumanMessage(content=prompt)
         ]
         
@@ -250,12 +305,69 @@ class GuidanceAnalyzer:
                 extraction_reasoning=f"Failed to parse JSON: {parsed_data.get('error', 'Unknown error')}"
             )
         
+        # Sanitize the parsed data before creating ODRLComponents
         try:
+            # Sanitize string lists
+            if 'actions' in parsed_data:
+                parsed_data['actions'] = self._sanitize_string_list(parsed_data['actions'], 'actions')
+            
+            if 'data_categories' in parsed_data:
+                parsed_data['data_categories'] = self._sanitize_string_list(parsed_data['data_categories'], 'data_categories')
+            
+            if 'data_subjects' in parsed_data:
+                parsed_data['data_subjects'] = self._sanitize_string_list(parsed_data['data_subjects'], 'data_subjects')
+            
+            if 'geographic_scope' in parsed_data:
+                parsed_data['geographic_scope'] = self._sanitize_string_list(parsed_data['geographic_scope'], 'geographic_scope')
+            
+            if 'evidence_requirements' in parsed_data:
+                parsed_data['evidence_requirements'] = self._sanitize_string_list(parsed_data['evidence_requirements'], 'evidence_requirements')
+            
+            if 'verification_methods' in parsed_data:
+                parsed_data['verification_methods'] = self._sanitize_string_list(parsed_data['verification_methods'], 'verification_methods')
+            
+            # Sanitize dict lists
+            if 'permissions' in parsed_data:
+                parsed_data['permissions'] = self._sanitize_dict_list(parsed_data['permissions'], 'permissions')
+            
+            if 'prohibitions' in parsed_data:
+                parsed_data['prohibitions'] = self._sanitize_dict_list(parsed_data['prohibitions'], 'prohibitions')
+            
+            if 'constraints' in parsed_data:
+                parsed_data['constraints'] = self._sanitize_dict_list(parsed_data['constraints'], 'constraints')
+            
+            # Ensure parties is a dict with list values
+            if 'parties' in parsed_data:
+                if isinstance(parsed_data['parties'], dict):
+                    for key, value in parsed_data['parties'].items():
+                        if isinstance(value, list):
+                            parsed_data['parties'][key] = self._sanitize_string_list(value, f'parties.{key}')
+                        else:
+                            parsed_data['parties'][key] = []
+                else:
+                    parsed_data['parties'] = {}
+            
+            # Create components with sanitized data
             components = ODRLComponents(**parsed_data)
             logger.info(f"Stage 5 synthesis complete for {rule_name}")
+            logger.info(f"  - Actions: {len(components.actions)}")
+            logger.info(f"  - Permissions: {len(components.permissions)}")
+            logger.info(f"  - Prohibitions: {len(components.prohibitions)}")
+            logger.info(f"  - Constraints: {len(components.constraints)}")
+            logger.info(f"  - Data categories: {len(components.data_categories)}")
+            
             return components
+            
+        except ValidationError as e:
+            logger.error(f"Pydantic validation error for {rule_name}: {e}")
+            logger.error(f"Parsed data: {parsed_data}")
+            
+            # Return minimal valid structure with error info
+            return ODRLComponents(
+                extraction_reasoning=f"Validation error: {str(e)}"
+            )
         except Exception as e:
-            logger.error(f"Error creating ODRLComponents: {e}")
+            logger.error(f"Error creating ODRLComponents for {rule_name}: {e}")
             logger.error(f"Parsed data: {parsed_data}")
             return ODRLComponents(
                 extraction_reasoning=f"Error creating components: {str(e)}"

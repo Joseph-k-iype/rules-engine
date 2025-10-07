@@ -5,12 +5,13 @@ Enhanced with decision inference capabilities for yes/no/maybe outcomes.
 import json
 import logging
 from datetime import datetime
-from typing import List, Dict, Union, Optional
+from typing import Any, List, Dict, Union, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
+import re
 
 from .config import Config
 from .models.rules import LegislationRule, ExtractionResult
@@ -826,3 +827,269 @@ class LegislationAnalyzer:
                 logger.error(f"Failed to create minimal rule for {role}: {e}")
         
         return minimal_rules
+    async def process_legislation_folder_to_odrl(self, folder_path: str = None) -> Dict[str, Any]:
+        """
+        Process all configured legislation entries and convert to ODRL format.
+        Aligned EXACTLY with CSV to ODRL output structure.
+        NO TRUNCATION - all text preserved in full.
+        
+        Returns:
+            Dict with 'policies', 'processing_time', 'documents_processed', 
+            'successful', 'failed', 'total_entries'
+        """
+        from .analyzers.guidance_analyzer import GuidanceAnalyzer
+        from .generators.odrl_rule_generator import ODRLRuleGenerator
+        from .managers.data_category_manager import DataCategoryManager
+        
+        if folder_path is None:
+            folder_path = Config.LEGISLATION_PDF_PATH
+
+        import os
+        os.makedirs(folder_path, exist_ok=True)
+
+        processing_entries = self.metadata_manager.get_all_processing_entries()
+
+        if not processing_entries:
+            logger.warning("No processing entries found in metadata configuration")
+            return {
+                'policies': [],
+                'processing_time': 0.0,
+                'documents_processed': {},
+                'successful': 0,
+                'failed': 0,
+                'total_entries': 0
+            }
+
+        guidance_analyzer = GuidanceAnalyzer()
+        odrl_generator = ODRLRuleGenerator()
+        data_category_manager = DataCategoryManager()
+        
+        all_policies = []
+        documents_processed = {}
+        start_time = datetime.utcnow()
+        
+        statistics = {
+            'total_entries': 0,
+            'successful': 0,
+            'failed': 0
+        }
+
+        for entry_id, metadata in processing_entries:
+            try:
+                logger.info(f"Processing entry for ODRL conversion: {entry_id}")
+
+                # Process PDFs from all levels
+                entry_documents = self.multi_level_processor.process_country_documents(
+                    entry_id, metadata, folder_path
+                )
+
+                if not entry_documents:
+                    logger.warning(f"No documents found for entry {entry_id}")
+                    continue
+
+                documents_processed[entry_id] = list(entry_documents.keys())
+
+                # Extract text from all levels
+                full_text = ""
+                source_files = {
+                    "level_1": metadata.file_level_1,
+                    "level_2": metadata.file_level_2,
+                    "level_3": metadata.file_level_3
+                }
+                
+                for level, content in entry_documents.items():
+                    if isinstance(content, list):  # Chunked document
+                        level_text = "\n\n".join([chunk.content for chunk in content])
+                    else:
+                        level_text = content
+                    full_text += f"\n\n--- {level.upper()} ---\n\n{level_text}"
+
+                # Split text into rule segments
+                rule_segments = self._segment_text_into_rules(full_text, entry_id)
+                
+                print(f"\n📄 Processing {entry_id}: {len(rule_segments)} rule segments found")
+                print("-"*80)
+                
+                statistics['total_entries'] += len(rule_segments)
+
+                for idx, segment in enumerate(rule_segments, 1):
+                    try:
+                        rule_name = segment.get('title', f"{entry_id}_rule_{idx}")
+                        rule_text = segment.get('text', '')
+                        
+                        if len(rule_text.strip()) < 100:  # Skip very short segments
+                            continue
+                        
+                        print(f"\n[{idx}/{len(rule_segments)}] Analyzing: {rule_name}")
+                        print(f"    Text length: {len(rule_text)} chars")
+                        
+                        # Analyze using guidance analyzer (SAME AS CSV TO ODRL)
+                        print("    🔍 Analyzing guidance...")
+                        odrl_components = await guidance_analyzer.analyze_guidance(
+                            guidance_text=rule_text,
+                            rule_name=rule_name,
+                            framework_type="PDF",
+                            restriction_condition="mixed",
+                            rule_id=f"{entry_id}_{idx}"
+                        )
+                        
+                        print(f"    ✅ Extracted {len(odrl_components.actions)} actions, "
+                            f"{len(odrl_components.permissions)} permissions, "
+                            f"{len(odrl_components.prohibitions)} prohibitions")
+                        
+                        # Discover and add data categories
+                        category_uuids = {}
+                        if odrl_components.data_categories:
+                            print(f"    📊 Processing {len(odrl_components.data_categories)} data categories...")
+                            category_uuids = await data_category_manager.discover_and_add_categories(
+                                odrl_components.data_categories
+                            )
+                        
+                        # Generate ODRL policy (EXACT SAME AS CSV TO ODRL)
+                        print("    🗂️ Generating ODRL policy...")
+                        policy = odrl_generator.generate_policy(
+                            policy_id=f"{entry_id}_{idx}",
+                            rule_name=rule_name,
+                            odrl_components=odrl_components,
+                            framework_type="PDF",
+                            restriction_condition="mixed",
+                            data_category_uuids=category_uuids
+                        )
+                        
+                        # Add metadata - NO TRUNCATION
+                        policy['custom:originalData'] = {
+                            'id': f"{entry_id}_{idx}",
+                            'rule_name': rule_name,
+                            'framework': "PDF",
+                            'type': "mixed",
+                            'entry_id': entry_id,
+                            'rule_index': idx,
+                            'source_files': source_files,
+                            'countries': metadata.country,
+                            'adequacy_countries': metadata.adequacy_country or [],
+                            'guidance_text': rule_text  # FULL TEXT, NOT TRUNCATED
+                        }
+                        
+                        # Validate policy
+                        validation = odrl_generator.validate_policy(policy)
+                        if not validation['valid']:
+                            print(f"    ⚠️ Validation issues: {validation['issues']}")
+                            statistics['failed'] += 1
+                        else:
+                            statistics['successful'] += 1
+                        
+                        if validation['warnings']:
+                            print(f"    ⚠️ Warnings: {validation['warnings']}")
+                        
+                        all_policies.append(policy)
+                        print(f"    ✅ Policy created successfully")
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing segment {idx} in {entry_id}: {e}")
+                        print(f"    ❌ Error: {e}")
+                        statistics['failed'] += 1
+                        continue
+
+            except Exception as e:
+                logger.error(f"Error processing entry {entry_id}: {e}")
+                continue
+
+        end_time = datetime.utcnow()
+        total_processing_time = (end_time - start_time).total_seconds()
+
+        # Save data categories
+        print(f"\n💾 Saving data categories...")
+        data_category_manager.save_categories()
+        
+        cat_stats = data_category_manager.get_statistics()
+        print(f"    Total categories: {cat_stats['total_categories']}")
+        print(f"    Saved to: {cat_stats['categories_file']}")
+        
+        print(f"\n🎉 Conversion complete!")
+        
+        return {
+            'policies': all_policies,
+            'processing_time': total_processing_time,
+            'documents_processed': documents_processed,
+            'successful': statistics['successful'],
+            'failed': statistics['failed'],
+            'total_entries': statistics['total_entries']
+        }
+
+
+    # METHOD 2: Add this complete method to LegislationAnalyzer class
+
+    def _segment_text_into_rules(self, text: str, entry_id: str) -> List[Dict[str, str]]:
+        """
+        Segment text into potential rules.
+        Enhanced to detect various section markers.
+        NO TRUNCATION - preserves full text.
+        
+        Args:
+            text: Full text to segment
+            entry_id: Entry identifier
+            
+        Returns:
+            List of dictionaries with 'title' and 'text' keys
+        """
+        segments = []
+        
+        # Try to find article/section markers with multiple patterns
+        patterns = [
+            r'(?:Article|Art\.|ARTICLE)\s+(\d+[A-Za-z]?)[:.]\s*([^\n]+)',
+            r'(?:Section|Sec\.|SECTION)\s+(\d+[A-Za-z]?)[:.]\s*([^\n]+)',
+            r'(?:Clause|CLAUSE)\s+(\d+[A-Za-z]?)[:.]\s*([^\n]+)',
+            r'(?:Rule|RULE)\s+(\d+[A-Za-z]?)[:.]\s*([^\n]+)',
+            r'(?:Chapter|CHAPTER)\s+(\d+[A-Za-z]?)[:.]\s*([^\n]+)',
+            r'(?:Paragraph|Para\.|PARAGRAPH)\s+(\d+[A-Za-z]?)[:.]\s*([^\n]+)',
+            r'(\d+[A-Za-z]?)\.\s+([A-Z][^\n]+)',  # Numbered sections like "1. Title"
+        ]
+        
+        matches = []
+        for pattern in patterns:
+            found = list(re.finditer(pattern, text, re.IGNORECASE | re.MULTILINE))
+            if found:
+                matches = found
+                break
+        
+        if matches:
+            # Split by detected markers
+            for i, match in enumerate(matches):
+                start_pos = match.start()
+                end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+                
+                segment_text = text[start_pos:end_pos].strip()
+                
+                # Extract title from match groups
+                if len(match.groups()) >= 2:
+                    number, title = match.group(1), match.group(2)
+                    segment_title = f"{entry_id} - {number} {title.strip()}"
+                else:
+                    segment_title = f"{entry_id} - Segment {i + 1}"
+                
+                if len(segment_text) > 100:  # Only keep substantial segments
+                    segments.append({
+                        'title': segment_title,
+                        'text': segment_text  # NO TRUNCATION
+                    })
+        else:
+            # No clear article structure, split by length with overlap
+            chunk_size = 3000
+            overlap = 200
+            
+            for i in range(0, len(text), chunk_size - overlap):
+                segment_text = text[i:i + chunk_size].strip()
+                if len(segment_text) > 100:
+                    segments.append({
+                        'title': f"{entry_id} - Segment {len(segments) + 1}",
+                        'text': segment_text  # NO TRUNCATION
+                    })
+        
+        # If no segments created, use full text
+        if not segments:
+            segments = [{
+                'title': entry_id,
+                'text': text  # NO TRUNCATION
+            }]
+        
+        return segments
