@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, ValidationError
 from ..services.openai_service import OpenAIService
 from ..utils.json_parser import SafeJsonParser
 from ..prompting.strategies import PromptingStrategies
+from ..validators import ODRLLogicalValidator  # ← ADD THIS LINE
 
 logger = logging.getLogger(__name__)
 
@@ -265,18 +266,45 @@ class GuidanceAnalyzer:
         return sanitized
     
     async def _stage5_synthesis(
-        self,
-        guidance_text: str,
-        rule_name: str,
-        framework_type: str,
-        restriction_condition: str,
-        initial_analysis: str,
-        odrl_extraction: str,
-        constraint_analysis: str,
-        data_categories: str
-    ) -> ODRLComponents:
-        """Stage 5: Synthesize all analyses into structured ODRL components."""
+    self,
+    guidance_text: str,
+    rule_name: str,
+    framework_type: str,
+    restriction_condition: str,
+    initial_analysis: str,
+    odrl_extraction: str,
+    constraint_analysis: str,
+    data_categories: str
+) -> ODRLComponents:
+        """
+        Stage 5: Synthesize all analyses into structured ODRL components
+        with logical consistency validation.
         
+        This method:
+        1. Calls LLM to synthesize all previous analyses
+        2. Parses and sanitizes the response
+        3. Validates for logical duplications
+        4. Auto-resolves duplications if found
+        5. Re-validates after resolution
+        6. Returns clean, consistent ODRL components
+        
+        Args:
+            guidance_text: Complete guidance text
+            rule_name: Name/title of the rule
+            framework_type: DSS or DataVISA
+            restriction_condition: restriction or condition
+            initial_analysis: Stage 1 analysis output
+            odrl_extraction: Stage 2 extraction output
+            constraint_analysis: Stage 3 constraint analysis
+            data_categories: Stage 4 data category identification
+            
+        Returns:
+            ODRLComponents with validated and consistent data
+        """
+        
+        logger.info(f"Stage 5: Synthesizing ODRL components for {rule_name}")
+        
+        # Build the synthesis prompt
         prompt = PromptingStrategies.odrl_synthesis_prompt(
             guidance_text=guidance_text,
             rule_name=rule_name,
@@ -288,87 +316,229 @@ class GuidanceAnalyzer:
             data_categories=data_categories
         )
         
+        # Prepare messages for LLM
         messages = [
-            SystemMessage(content="You are an expert system for creating ODRL policies. Synthesize complex analyses into precise, machine-readable ODRL structures. Return only valid JSON with actual extracted data, not template instructions."),
+            SystemMessage(content=(
+                "You are an expert system for creating ODRL policies. "
+                "Synthesize complex analyses into precise, machine-readable ODRL structures. "
+                "CRITICAL: Avoid creating duplicate constraints in both permissions and prohibitions. "
+                "Each constraint should appear in only ONE place. Use logical reasoning to determine "
+                "whether a constraint belongs in permissions or prohibitions. "
+                "Prefer positive framing (permissions with positive operators) over negative framing. "
+                "Return only valid JSON with actual extracted data, not template instructions."
+            )),
             HumanMessage(content=prompt)
         ]
         
-        response = await self.openai_service.chat_completion(messages)
-        
-        # Parse JSON response
-        parsed_data = self.json_parser.parse_json_response(response)
-        
-        if "error" in parsed_data:
-            logger.error(f"Failed to parse synthesis JSON for {rule_name}: {parsed_data}")
-            # Return minimal structure
-            return ODRLComponents(
-                extraction_reasoning=f"Failed to parse JSON: {parsed_data.get('error', 'Unknown error')}"
-            )
-        
-        # Sanitize the parsed data before creating ODRLComponents
         try:
-            # Sanitize string lists
-            if 'actions' in parsed_data:
-                parsed_data['actions'] = self._sanitize_string_list(parsed_data['actions'], 'actions')
+            # Get LLM response with lower temperature for consistency
+            logger.debug(f"Requesting LLM synthesis for {rule_name}")
+            response = await self.openai_service.get_completion(
+                messages=messages,
+                temperature=0.1,  # Lower temperature for more deterministic, consistent output
+                max_tokens=4000
+            )
             
-            if 'data_categories' in parsed_data:
-                parsed_data['data_categories'] = self._sanitize_string_list(parsed_data['data_categories'], 'data_categories')
+            logger.debug(f"Received LLM response for {rule_name}")
             
-            if 'data_subjects' in parsed_data:
-                parsed_data['data_subjects'] = self._sanitize_string_list(parsed_data['data_subjects'], 'data_subjects')
+            # Parse JSON response
+            parsed_data = self.json_parser.parse_json_safely(response.content)
             
-            if 'geographic_scope' in parsed_data:
-                parsed_data['geographic_scope'] = self._sanitize_string_list(parsed_data['geographic_scope'], 'geographic_scope')
+            if not parsed_data:
+                logger.error(f"Failed to parse synthesis response for {rule_name}")
+                logger.debug(f"Raw response: {response.content[:500]}...")
+                return ODRLComponents(
+                    extraction_reasoning="Failed to parse LLM response"
+                )
             
-            if 'evidence_requirements' in parsed_data:
-                parsed_data['evidence_requirements'] = self._sanitize_string_list(parsed_data['evidence_requirements'], 'evidence_requirements')
+            # Log LLM reasoning if provided
+            if 'reasoning' in parsed_data:
+                logger.info(f"LLM Reasoning for {rule_name}:")
+                reasoning_lines = parsed_data['reasoning'].split('\n')
+                for line in reasoning_lines[:10]:  # Log first 10 lines
+                    if line.strip():
+                        logger.info(f"  {line.strip()}")
+                if len(reasoning_lines) > 10:
+                    logger.info(f"  ... ({len(reasoning_lines) - 10} more lines)")
             
-            if 'verification_methods' in parsed_data:
-                parsed_data['verification_methods'] = self._sanitize_string_list(parsed_data['verification_methods'], 'verification_methods')
+            # Sanitize data types to ensure proper structure
+            logger.debug(f"Sanitizing parsed data for {rule_name}")
             
-            # Sanitize dict lists
-            if 'permissions' in parsed_data:
-                parsed_data['permissions'] = self._sanitize_dict_list(parsed_data['permissions'], 'permissions')
+            # Ensure list fields are lists
+            for key in ['actions', 'data_categories', 'data_subjects']:
+                if key in parsed_data:
+                    if not isinstance(parsed_data[key], list):
+                        logger.warning(f"{key} is not a list, converting to empty list")
+                        parsed_data[key] = []
+                else:
+                    parsed_data[key] = []
             
-            if 'prohibitions' in parsed_data:
-                parsed_data['prohibitions'] = self._sanitize_dict_list(parsed_data['prohibitions'], 'prohibitions')
+            # Sanitize rule lists (permissions, prohibitions, constraints)
+            for key in ['permissions', 'prohibitions', 'constraints']:
+                if key in parsed_data:
+                    parsed_data[key] = self._sanitize_rule_list(
+                        parsed_data.get(key), 
+                        f'{key}'
+                    )
+                else:
+                    parsed_data[key] = []
             
-            if 'constraints' in parsed_data:
-                parsed_data['constraints'] = self._sanitize_dict_list(parsed_data['constraints'], 'constraints')
-            
-            # Ensure parties is a dict with list values
+            # Sanitize parties structure
             if 'parties' in parsed_data:
                 if isinstance(parsed_data['parties'], dict):
-                    for key, value in parsed_data['parties'].items():
-                        if isinstance(value, list):
-                            parsed_data['parties'][key] = self._sanitize_string_list(value, f'parties.{key}')
+                    for key in ['controllers', 'processors', 'assigners', 
+                            'assignees', 'third_parties']:
+                        if key in parsed_data['parties']:
+                            if not isinstance(parsed_data['parties'][key], list):
+                                logger.warning(
+                                    f'parties.{key} is not a list, converting to empty list'
+                                )
+                                parsed_data['parties'][key] = []
                         else:
                             parsed_data['parties'][key] = []
                 else:
-                    parsed_data['parties'] = {}
+                    logger.warning("parties is not a dict, creating empty structure")
+                    parsed_data['parties'] = {
+                        'controllers': [],
+                        'processors': [],
+                        'assigners': [],
+                        'assignees': [],
+                        'third_parties': []
+                    }
+            else:
+                parsed_data['parties'] = {
+                    'controllers': [],
+                    'processors': [],
+                    'assigners': [],
+                    'assignees': [],
+                    'third_parties': []
+                }
             
-            # Create components with sanitized data
-            components = ODRLComponents(**parsed_data)
+            # Create initial components from parsed data
+            logger.debug(f"Creating ODRLComponents for {rule_name}")
+            try:
+                components = ODRLComponents(**parsed_data)
+            except ValidationError as e:
+                logger.error(f"Pydantic validation error for {rule_name}: {e}")
+                logger.error(f"Parsed data keys: {list(parsed_data.keys())}")
+                return ODRLComponents(
+                    extraction_reasoning=f"Validation error: {str(e)}"
+                )
+            
+            # ═══════════════════════════════════════════════════════════════
+            # VALIDATION STEP: Check for logical duplications
+            # ═══════════════════════════════════════════════════════════════
+            
+            logger.info(f"Validating logical consistency for {rule_name}")
+            validator = ODRLLogicalValidator(strict_mode=False)
+            validation_results = validator.validate_components(components)
+            
+            if not validation_results.valid:
+                logger.warning(f"⚠️  Logical inconsistencies found in {rule_name}:")
+                logger.warning(f"   Total errors: {len(validation_results.errors)}")
+                logger.warning(f"   Total duplications: {len(validation_results.duplications)}")
+                
+                # Log each error
+                for error in validation_results.errors:
+                    logger.warning(f"  ❌ {error}")
+                
+                # Log suggestions
+                for suggestion in validation_results.suggestions:
+                    logger.info(f"  💡 {suggestion}")
+                
+                # AUTO-RESOLVE: Remove duplications
+                if validation_results.duplications:
+                    logger.info(f"Attempting auto-resolution for {rule_name}...")
+                    
+                    # Apply auto-resolution
+                    components = validator.auto_resolve_duplications(
+                        components, 
+                        validation_results
+                    )
+                    
+                    # Re-validate after resolution
+                    logger.info(f"Re-validating after auto-resolution...")
+                    revalidation = validator.validate_components(components)
+                    
+                    if revalidation.valid:
+                        logger.info(f"✅ Auto-resolution successful for {rule_name}")
+                        logger.info(f"   All logical duplications resolved")
+                    else:
+                        logger.warning(
+                            f"⚠️  Some issues remain after auto-resolution for {rule_name}"
+                        )
+                        if revalidation.errors:
+                            logger.warning(f"   Remaining errors: {len(revalidation.errors)}")
+                            for error in revalidation.errors[:3]:  # Log first 3
+                                logger.warning(f"   - {error}")
+            else:
+                logger.info(f"✅ No logical duplications found in {rule_name}")
+            
+            # Log final component statistics
             logger.info(f"Stage 5 synthesis complete for {rule_name}")
             logger.info(f"  - Actions: {len(components.actions)}")
             logger.info(f"  - Permissions: {len(components.permissions)}")
             logger.info(f"  - Prohibitions: {len(components.prohibitions)}")
             logger.info(f"  - Constraints: {len(components.constraints)}")
             logger.info(f"  - Data categories: {len(components.data_categories)}")
+            logger.info(f"  - Data subjects: {len(components.data_subjects)}")
+            
+            # Log warnings if prohibitions still exist (might be intentional)
+            if len(components.prohibitions) > 0:
+                logger.debug(f"  Note: {len(components.prohibitions)} prohibition(s) present")
+                for i, prohib in enumerate(components.prohibitions):
+                    if isinstance(prohib, dict):
+                        action = prohib.get('action', 'unknown')
+                        constraint_count = len(prohib.get('constraints', []))
+                        logger.debug(f"    Prohibition {i}: action={action}, constraints={constraint_count}")
             
             return components
             
         except ValidationError as e:
             logger.error(f"Pydantic validation error for {rule_name}: {e}")
-            logger.error(f"Parsed data: {parsed_data}")
+            logger.error(f"Parsed data structure:")
+            if parsed_data:
+                for key in parsed_data.keys():
+                    logger.error(f"  - {key}: {type(parsed_data[key])}")
             
             # Return minimal valid structure with error info
             return ODRLComponents(
                 extraction_reasoning=f"Validation error: {str(e)}"
             )
+            
         except Exception as e:
-            logger.error(f"Error creating ODRLComponents for {rule_name}: {e}")
-            logger.error(f"Parsed data: {parsed_data}")
+            logger.error(f"Unexpected error in synthesis for {rule_name}: {e}")
+            logger.exception("Full traceback:")
             return ODRLComponents(
-                extraction_reasoning=f"Error creating components: {str(e)}"
+                extraction_reasoning=f"Error in synthesis: {str(e)}"
             )
+
+
+    def _sanitize_rule_list(self, data: Any, field_name: str) -> List[Dict]:
+        """
+        Sanitize rule lists to ensure they contain only valid dictionaries.
+        
+        Args:
+            data: Data to sanitize
+            field_name: Name of the field for logging
+            
+        Returns:
+            List of valid dictionaries
+        """
+        if not data:
+            return []
+        
+        if not isinstance(data, list):
+            logger.warning(f"{field_name} is not a list: {type(data)}")
+            return []
+        
+        sanitized = []
+        for i, item in enumerate(data):
+            if isinstance(item, dict):
+                sanitized.append(item)
+            else:
+                logger.warning(
+                    f"Non-dict item in {field_name}[{i}]: {type(item)}, skipping"
+                )
+        
+        return sanitized
