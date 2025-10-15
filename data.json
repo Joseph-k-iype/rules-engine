@@ -1,0 +1,200 @@
+[
+  {
+    "user_id": "usr_2891",
+    "email": "anna.mueller@example.de",
+    "country": "DE",
+    "region": "EU",
+    "account_status": "active",
+    "consent": {
+      "marketing": true,
+      "analytics": true,
+      "status": "active"
+    },
+    "personal_data": {
+      "collected_fields": ["name", "email", "address"],
+      "necessary_fields": ["name", "email", "address"],
+      "sensitive_data": false
+    },
+    "data_transfers": {
+      "third_countries": ["US", "UK"],
+      "adequacy_decision": true,
+      "standard_clauses": true,
+      "dpa_signed": true
+    },
+    "vendor_relationships": [
+      {
+        "vendor_id": "vnd_001",
+        "name": "CloudAnalytics Inc",
+        "country": "US",
+        "dpa_status": "signed",
+        "sub_processors": []
+      },
+      {
+        "vendor_id": "vnd_002",
+        "name": "MarketingPro Ltd",
+        "country": "UK",
+        "dpa_status": "signed",
+        "sub_processors": []
+      }
+    ]
+  },
+  {
+    "user_id": "usr_5472",
+    "email": "invalid-email",
+    "country": "US",
+    "region": "NA",
+    "account_status": "inactive",
+    "consent": {
+      "marketing": false,
+      "analytics": true,
+      "status": "withdrawn"
+    },
+    "personal_data": {
+      "collected_fields": ["name", "email", "phone", "ssn", "credit_score"],
+      "necessary_fields": ["name", "email"],
+      "sensitive_data": true
+    },
+    "data_transfers": {
+      "third_countries": ["IN", "PH"],
+      "adequacy_decision": false,
+      "standard_clauses": false,
+      "dpa_signed": false
+    },
+    "vendor_relationships": [
+      {
+        "vendor_id": "vnd_003",
+        "name": "DataProcessor Co",
+        "country": "IN",
+        "dpa_status": "pending",
+        "sub_processors": []
+      }
+    ]
+  },
+  {
+    "user_id": "usr_8123",
+    "email": "maria.garcia@example.es",
+    "country": "ES",
+    "region": "EU",
+    "account_status": "active",
+    "consent": {
+      "marketing": true,
+      "analytics": true,
+      "status": "active"
+    },
+    "personal_data": {
+      "collected_fields": ["name", "email", "address", "phone", "location_data", "biometric_fingerprint"],
+      "necessary_fields": ["name", "email"],
+      "sensitive_data": true
+    },
+    "data_transfers": {
+      "third_countries": ["BR", "CN"],
+      "adequacy_decision": false,
+      "standard_clauses": true,
+      "dpa_signed": true
+    },
+    "vendor_relationships": [
+      {
+        "vendor_id": "vnd_004",
+        "name": "AI Analytics Ltd",
+        "country": "CN",
+        "dpa_status": "signed",
+        "sub_processors": [
+          {
+            "vendor_id": "vnd_004_sub1",
+            "name": "Cloud Storage Co",
+            "country": "CN",
+            "dpa_status": "signed",
+            "sub_processors": []
+          }
+        ]
+      },
+      {
+        "vendor_id": "vnd_005",
+        "name": "Marketing Solutions",
+        "country": "BR",
+        "dpa_status": "signed",
+        "sub_processors": []
+      }
+    ]
+  },
+  {
+    "user_id": "usr_3344",
+    "email": "yuki.tanaka@example.jp",
+    "country": "JP",
+    "region": "APAC",
+    "account_status": "active",
+    "consent": {
+      "marketing": false,
+      "analytics": true,
+      "status": "active"
+    },
+    "personal_data": {
+      "collected_fields": ["name", "email", "phone", "purchase_history"],
+      "necessary_fields": ["name", "email", "phone"],
+      "sensitive_data": false
+    },
+    "data_transfers": {
+      "third_countries": ["US"],
+      "adequacy_decision": true,
+      "standard_clauses": true,
+      "dpa_signed": true
+    },
+    "vendor_relationships": [
+      {
+        "vendor_id": "vnd_006",
+        "name": "US Cloud Services",
+        "country": "US",
+        "dpa_status": "signed",
+        "sub_processors": []
+      }
+    ]
+  },
+  {
+    "user_id": "usr_9901",
+    "email": "ahmed.hassan@example.eg",
+    "country": "EG",
+    "region": "MENA",
+    "account_status": "suspended",
+    "consent": {
+      "marketing": true,
+      "analytics": false,
+      "status": "expired"
+    },
+    "personal_data": {
+      "collected_fields": ["name", "email", "phone", "address", "national_id_ssn", "health_records", "credit_card_info"],
+      "necessary_fields": ["name", "email", "national_id_ssn"],
+      "sensitive_data": true
+    },
+    "data_transfers": {
+      "third_countries": [],
+      "adequacy_decision": false,
+      "standard_clauses": false,
+      "dpa_signed": false
+    },
+    "vendor_relationships": [
+      {
+        "vendor_id": "vnd_007",
+        "name": "Local Processor",
+        "country": "EG",
+        "dpa_status": "signed",
+        "sub_processors": [
+          {
+            "vendor_id": "vnd_007_sub1",
+            "name": "Regional Data Center",
+            "country": "EG",
+            "dpa_status": "signed",
+            "sub_processors": [
+              {
+                "vendor_id": "vnd_007_sub1_sub1",
+                "name": "Hardware Provider",
+                "country": "CN",
+                "dpa_status": "pending",
+                "sub_processors": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

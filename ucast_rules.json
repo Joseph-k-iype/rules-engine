@@ -1,0 +1,147 @@
+{
+  "policies": [
+    {
+      "id": "feature_1_set_operations",
+      "name": "data_minimization_check",
+      "description": "LIMITATION: UCAST can only check if collected is subset of necessary. Cannot compute set difference or show which fields are excessive.",
+      "supported": "LIMITED",
+      "condition": {
+        "operator": "subset",
+        "field": "personal_data.collected_fields",
+        "reference": "personal_data.necessary_fields",
+        "allow_extra": false
+      },
+      "limitations": [
+        "Cannot perform set difference (collected - necessary)",
+        "Cannot calculate count of excessive fields",
+        "Cannot return which specific fields are excessive",
+        "No set union or intersection operations"
+      ]
+    },
+    {
+      "id": "feature_2_universal_quantification",
+      "name": "all_vendors_have_dpa",
+      "description": "LIMITATION: UCAST has basic 'all' but cannot check multiple conditions per item or use complex logic",
+      "supported": "LIMITED",
+      "condition": {
+        "operator": "all",
+        "field": "vendor_relationships",
+        "condition": {
+          "operator": "eq",
+          "field": "dpa_status",
+          "value": "signed"
+        }
+      },
+      "limitations": [
+        "Can only check ONE condition per item",
+        "Cannot combine multiple conditions (e.g., dpa_status AND country)",
+        "Cannot use 'every' with complex nested logic",
+        "Cannot check if country is in a set of adequacy countries"
+      ]
+    },
+    {
+      "id": "feature_2b_universal_quantification_complex",
+      "name": "vendors_in_adequate_countries",
+      "description": "LIMITATION: Cannot check if ALL vendors are in adequacy country list",
+      "supported": "NO",
+      "condition": {
+        "operator": "comment",
+        "value": "IMPOSSIBLE: UCAST cannot check 'every vendor.country in [list]'"
+      },
+      "limitations": [
+        "No way to express 'all items match complex condition'",
+        "Cannot iterate and check membership in a set",
+        "Would need separate rule for each vendor position"
+      ]
+    },
+    {
+      "id": "feature_3_regex_matching",
+      "name": "email_format_validation",
+      "description": "LIMITATION: UCAST has NO regex support",
+      "supported": "NO",
+      "condition": {
+        "operator": "comment",
+        "value": "IMPOSSIBLE: UCAST has no regex.match() function"
+      },
+      "limitations": [
+        "No regex support at all",
+        "Cannot validate email formats",
+        "Cannot detect patterns in field names",
+        "Cannot match sensitive data patterns",
+        "Needs external validation in application code"
+      ]
+    },
+    {
+      "id": "feature_3b_regex_field_detection",
+      "name": "sensitive_field_pattern_detection",
+      "description": "LIMITATION: Cannot use regex to find fields matching patterns like '.*ssn.*' or '.*credit.*'",
+      "supported": "NO",
+      "condition": {
+        "operator": "comment",
+        "value": "IMPOSSIBLE: No regex pattern matching available"
+      },
+      "limitations": [
+        "Cannot detect field names matching patterns",
+        "Cannot use case-insensitive matching",
+        "Must hardcode exact field names",
+        "No wildcard or pattern support"
+      ]
+    },
+    {
+      "id": "feature_4_recursive_rules",
+      "name": "vendor_chain_validation",
+      "description": "LIMITATION: UCAST cannot perform recursive evaluation of nested structures",
+      "supported": "NO",
+      "condition": {
+        "operator": "comment",
+        "value": "IMPOSSIBLE: UCAST cannot recursively check vendor.sub_processors.sub_processors..."
+      },
+      "limitations": [
+        "No recursion support",
+        "Cannot traverse nested vendor chains",
+        "Cannot calculate chain depth",
+        "Cannot validate arbitrary depth structures",
+        "Limited to fixed depth checking only"
+      ]
+    },
+    {
+      "id": "basic_consent_check",
+      "name": "marketing_consent_active",
+      "description": "BASIC FEATURE: This works in UCAST (simple field comparison)",
+      "supported": "FULL",
+      "condition": {
+        "operator": "and",
+        "conditions": [
+          {
+            "operator": "eq",
+            "field": "consent.marketing",
+            "value": true
+          },
+          {
+            "operator": "eq",
+            "field": "consent.status",
+            "value": "active"
+          }
+        ]
+      }
+    },
+    {
+      "id": "basic_field_check",
+      "name": "has_dpa_signed",
+      "description": "BASIC FEATURE: Simple field existence and equality checks work",
+      "supported": "FULL",
+      "condition": {
+        "operator": "eq",
+        "field": "data_transfers.dpa_signed",
+        "value": true
+      }
+    }
+  ],
+  "summary": {
+    "total_advanced_features": 4,
+    "fully_supported": 0,
+    "limited_support": 1,
+    "not_supported": 3,
+    "note": "UCAST can only handle basic boolean logic and field comparisons. Advanced features require external application code."
+  }
+}

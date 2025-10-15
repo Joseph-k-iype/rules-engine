@@ -1,6 +1,7 @@
 """
 Anti-hallucination prompting strategies focused on dual action inference, decision-making, and whole document analysis.
 Enhanced with decision inference capabilities for yes/no/maybe outcomes.
+Location: src/prompting/strategies.py
 """
 
 
@@ -557,7 +558,11 @@ class PromptingStrategies:
            - rightOperand (constraint value)
            - description (plain English explanation)
         
-        6. PARTIES AND ROLES:
+        6. ASSETS/TARGETS:
+           - What data or resources do the rules apply to?
+           - How should they be described in ODRL terms?
+        
+        7. PARTIES AND ROLES:
            - Assigner: entity that grants permission or sets prohibition
            - Assignee: entity that receives permission or is subject to prohibition
            - Controller: determines purposes and means of processing
@@ -611,50 +616,31 @@ class PromptingStrategies:
            - What is the constraint value? (rightOperand)
            - How does this constraint limit or enable actions?
         
-        2. ODRL LEFT OPERANDS (standardized):
-           Common leftOperands:
-           - dateTime: specific date/time
-           - delayPeriod: delay before action
-           - elapsedTime: time since event
-           - event: triggering event
-           - count: number of times
-           - purpose: processing purpose
-           - recipient: who receives data
-           - spatial: geographic location
-           - industry: industry sector
-           - language: language requirement
-           - version: version requirement
-           - virtualLocation: online location
-           
-           Custom leftOperands when needed:
-           - dataCategory: type of data
-           - processingContext: context of processing
-           - consentStatus: consent state
-           - etc.
+        2. ODRL CONSTRAINT STRUCTURE:
+           Each constraint must have:
+           - leftOperand: Standard ODRL constraint operand
+             (e.g., dateTime, elapsedTime, count, purpose, recipient, spatial, etc.)
+           - operator: Standard ODRL operator
+             (eq, neq, lt, gt, lteq, gteq, isA, isAnyOf, isNoneOf, isAllOf, isPartOf, hasPart)
+           - rightOperand: Value to compare against
+             (must match leftOperand type - date, duration, number, URI, etc.)
+           - unit: Unit of measurement if applicable (e.g., P30D for 30 days)
+           - dataType: Data type of rightOperand (xsd:date, xsd:integer, etc.)
         
-        3. ODRL OPERATORS:
-           - eq: equal to
-           - neq: not equal to
-           - gt: greater than
-           - lt: less than
-           - gteq: greater than or equal
-           - lteq: less than or equal
-           - isA: is instance of type
-           - isPartOf: is part of collection
-           - isAllOf: matches all of set
-           - isAnyOf: matches any of set
-           - isNoneOf: matches none of set
+        3. CONSTRAINT CLASSIFICATION:
+           Identify which rule type each constraint applies to:
+           - Permission constraints: Conditions for allowed actions
+           - Prohibition constraints: Conditions for forbidden actions
+           - Duty constraints: Conditions for required actions
         
-        4. RIGHT OPERAND FORMAT:
-           - String: "value"
-           - Number: 123
-           - Date/Time: ISO 8601 format
-           - Duration: ISO 8601 duration (P30D, PT2H)
-           - Array: ["value1", "value2"]
-           - URI: reference to external resource
+        4. OPERATOR VALIDATION:
+           Verify operator appropriateness:
+           - Equality/Inequality: eq, neq (for exact matches)
+           - Comparison: lt, gt, lteq, gteq (for numeric/temporal values)
+           - Set operations: isAnyOf, isNoneOf, isAllOf (for lists)
+           - Hierarchical: isA, isPartOf, hasPart (for taxonomies)
         
-        5. CONSTRAINT SCOPE AND APPLICATION:
-           - Does this constraint apply to a permission, prohibition, or duty?
+        5. CONSTRAINT DEPENDENCIES:
            - Is the constraint mandatory (MUST) or optional (SHOULD)?
            - What happens if the constraint is violated?
            - Are there any exceptions to the constraint?
@@ -822,365 +808,327 @@ class PromptingStrategies:
         Provide a complete list of ALL data categories with supporting evidence.
         """
 
-# Add this new method to PromptingStrategies class in strategies.py
-
-@staticmethod
-def odrl_synthesis_prompt(
-    guidance_text: str,
-    rule_name: str,
-    framework_type: str,
-    restriction_condition: str,
-    initial_analysis: str,
-    odrl_extraction: str,
-    constraint_analysis: str,
-    data_categories: str
-) -> str:
-    """
-    Stage 5: Final synthesis into structured ODRL components with logical consistency checking.
-    
-    This prompt instructs the LLM to:
-    1. Avoid creating duplicate constraints in permissions and prohibitions
-    2. Use logical reasoning to determine correct constraint placement
-    3. Prefer positive framing (permissions) over negative framing
-    4. Ensure each constraint appears only once
-    """
-    return f"""
-    Synthesize all previous analyses into comprehensive, structured ODRL components.
-    
-    RULE CONTEXT:
-    - Rule Name: {rule_name}
-    - Framework: {framework_type}
-    - Type: {restriction_condition}
-    
-    ORIGINAL GUIDANCE TEXT:
-    {guidance_text}
-    
-    ANALYSIS STAGES COMPLETED:
-    
-    STAGE 1 - COMPREHENSIVE ANALYSIS:
-    {initial_analysis}
-    
-    STAGE 2 - ODRL COMPONENT EXTRACTION:
-    {odrl_extraction}
-    
-    STAGE 3 - CONSTRAINT ANALYSIS:
-    {constraint_analysis}
-    
-    STAGE 4 - DATA CATEGORY IDENTIFICATION:
-    {data_categories}
-    
-    ═══════════════════════════════════════════════════════════════════════════════
-    CRITICAL LOGICAL CONSISTENCY REQUIREMENTS
-    ═══════════════════════════════════════════════════════════════════════════════
-    
-    1. AVOID DUPLICATION: A constraint should appear in EITHER permissions OR prohibitions, NOT both.
-       
-       ❌ WRONG:
-       Permission:   requestor eq "UK NCA"     (allowed if UK NCA)
-       Prohibition:  requestor neq "UK NCA"    (forbidden if not UK NCA)
-       → These are logically the SAME rule expressed differently!
-       
-       ✅ CORRECT:
-       Permission:   requestor eq "UK NCA"     (allowed if UK NCA)
-       Prohibition:  [empty]
-       → Single, clear rule
-    
-    2. LOGICAL REASONING FRAMEWORK:
-       
-       When you see: "Data sharing IS PERMITTED if requestor is X"
-       → Create: PERMISSION with constraint (leftOperand eq X)
-       → Do NOT create: PROHIBITION with constraint (leftOperand neq X)
-       
-       When you see: "Data sharing IS PROHIBITED if requestor is NOT X"
-       → Reframe as: PERMISSION with constraint (leftOperand eq X)
-       → This is clearer for enforcement systems
-       
-       When you see: "Action Y is absolutely PROHIBITED for all cases"
-       → Create: PROHIBITION without inverse permission
-       → Example: "Data selling is prohibited" → Prohibition only
-    
-    3. OPERATOR CORRECTNESS:
-       
-       PERMISSION with "eq" operator means: "allowed IF condition matches"
-       PROHIBITION with "neq" operator means: "forbidden IF condition does NOT match"
-       → These express the SAME rule differently - choose ONE
-       
-       PERMISSION with "isAnyOf" means: "allowed IF entity is in list"
-       PROHIBITION with "isNoneOf" means: "forbidden IF entity is NOT in list"
-       → These also express the SAME rule - choose ONE
-       
-       Prefer: PERMISSION with positive operators (eq, isAnyOf, isPartOf)
-       Avoid: Creating both permission and its logical inverse as prohibition
-    
-    4. DECISION TREE FOR AVOIDING DUPLICATION:
-       
-       For each constraint you identify, ask:
-       
-       Q1: Does this constraint already exist in permissions?
-       → If YES: DON'T add to prohibitions
-       
-       Q2: Does the inverse/complement of this constraint exist in prohibitions?
-       → If YES: DON'T add to permissions
-       
-       Q3: Is this constraint about WHO can do something?
-       → Prefer: PERMISSION with positive constraint (eq, isAnyOf)
-       → Avoid: PROHIBITION with negative constraint (neq, isNoneOf)
-       
-       Q4: Is this constraint about WHO cannot do something?
-       → Convert to: PERMISSION with positive constraint for allowed entities
-       
-       Q5: Is this constraint about WHAT is absolutely forbidden?
-       → Use: PROHIBITION (e.g., "selling data is prohibited")
-       → Don't create inverse permission
-    
-    5. REASONING PROCESS (must follow):
-       
-       Step 1: Extract all constraints from guidance
-       
-       Step 2: Group constraints by what they control:
-               - requestor/recipient constraints
-               - purpose constraints
-               - temporal constraints
-               - action constraints
-       
-       Step 3: For each group, determine if naturally a permission or prohibition:
-               • "Data CAN be shared with X" → PERMISSION
-               • "Data CANNOT be shared except with X" → PERMISSION (reframe positively)
-               • "Action Y is PROHIBITED" → PROHIBITION (absolute prohibition)
-               • "Data MUST be used for purpose Z" → PERMISSION with purpose constraint
-       
-       Step 4: Verify no logical contradictions exist
-       
-       Step 5: Ensure each constraint appears only once across all rules
-    
-    ═══════════════════════════════════════════════════════════════════════════════
-    EXAMPLES OF CORRECT HANDLING
-    ═══════════════════════════════════════════════════════════════════════════════
-    
-    Example 1 - Simple Requestor Constraint
-    ────────────────────────────────────────
-    Guidance: "Data sharing is permitted if the disclosure request originates from 
-               either the UK's National Crime Agency or a credit/financial institution."
-    
-    ❌ WRONG (duplication):
-    {{
-      "permissions": [{{
-        "constraint": [{{
-          "leftOperand": "requestor",
-          "operator": "isAnyOf",
-          "rightOperand": ["UK National Crime Agency", "credit/financial institution"]
-        }}]
-      }}],
-      "prohibitions": [{{
-        "constraint": [{{
-          "leftOperand": "requestor",
-          "operator": "isNoneOf",
-          "rightOperand": ["UK National Crime Agency", "credit/financial institution"]
-        }}]
-      }}]
-    }}
-    → Problem: Same constraint with inverse operators!
-    
-    ✅ CORRECT:
-    {{
-      "permissions": [{{
-        "action": "distribute",
-        "constraint": [{{
-          "leftOperand": "requestor",
-          "operator": "isAnyOf",
-          "rightOperand": ["UK National Crime Agency", "credit/financial institution"],
-          "description": "Requestor must be from approved list"
-        }}],
-        "description": "Data sharing permitted only if disclosure request originates from UK National Crime Agency or credit/financial institution"
-      }}],
-      "prohibitions": []
-    }}
-    → Clear: Single permission defines who can access
-    
-    Example 2 - Purpose Constraint
-    ────────────────────────────────
-    Guidance: "Personal data can only be processed for fraud prevention purposes."
-    
-    ❌ WRONG:
-    {{
-      "permissions": [{{
-        "constraint": [{{"leftOperand": "purpose", "operator": "eq", "rightOperand": "fraud_prevention"}}]
-      }}],
-      "prohibitions": [{{
-        "constraint": [{{"leftOperand": "purpose", "operator": "neq", "rightOperand": "fraud_prevention"}}]
-      }}]
-    }}
-    
-    ✅ CORRECT:
-    {{
-      "permissions": [{{
-        "action": "use",
-        "constraint": [{{
-          "leftOperand": "purpose",
-          "operator": "eq",
-          "rightOperand": "fraud_prevention",
-          "description": "Processing limited to fraud prevention"
-        }}],
-        "description": "Data processing permitted exclusively for fraud prevention purposes"
-      }}],
-      "prohibitions": []
-    }}
-    
-    Example 3 - Absolute Prohibition (Correct Usage)
-    ─────────────────────────────────────────────────
-    Guidance: "The sale of personal data is strictly prohibited under all circumstances."
-    
-    ✅ CORRECT:
-    {{
-      "permissions": [],
-      "prohibitions": [{{
-        "action": "sell",
-        "constraint": [],
-        "description": "Sale of personal data is absolutely prohibited"
-      }}]
-    }}
-    → This is an absolute prohibition, no permission equivalent exists
-    
-    Example 4 - Mixed Rules (Both Valid)
-    ────────────────────────────────────
-    Guidance: "Data may be shared with partner organizations for research purposes,
-               but selling data is prohibited."
-    
-    ✅ CORRECT:
-    {{
-      "permissions": [{{
-        "action": "distribute",
-        "constraint": [
-          {{"leftOperand": "recipient", "operator": "eq", "rightOperand": "partner_organization"}},
-          {{"leftOperand": "purpose", "operator": "eq", "rightOperand": "research"}}
-        ],
-        "description": "Sharing permitted with partners for research"
-      }}],
-      "prohibitions": [{{
-        "action": "sell",
-        "constraint": [],
-        "description": "Selling data is absolutely prohibited"
-      }}]
-    }}
-    → Different constraints controlling different things - both needed
-    
-    ═══════════════════════════════════════════════════════════════════════════════
-    SYNTHESIS TASK
-    ═══════════════════════════════════════════════════════════════════════════════
-    
-    First, provide your reasoning about permissions vs prohibitions:
-    - List all constraints you identified from the guidance
-    - For EACH constraint, explain whether it should be in permission or prohibition
-    - Explain why no duplications exist in your output
-    - Verify operators are correct for the rule type
-    
-    Then create the complete JSON structure following this format:
-    
-    {{
-      "reasoning": "
-        Constraint Analysis:
-        1. [Constraint description] → Classified as PERMISSION because [reason]
-        2. [Constraint description] → Classified as PROHIBITION because [reason]
+    @staticmethod
+    def odrl_synthesis_prompt(
+        guidance_text: str,
+        rule_name: str,
+        framework_type: str,
+        restriction_condition: str,
+        initial_analysis: str,
+        odrl_extraction: str,
+        constraint_analysis: str,
+        data_categories: str
+    ) -> str:
+        """
+        Stage 5: Final synthesis into structured ODRL components with logical consistency checking.
         
-        Verification:
-        - No duplicate constraints exist ✓
-        - No inverse operator pairs exist ✓
-        - Each constraint appears exactly once ✓
-        - Operators are semantically correct ✓
-      ",
-      
-      "actions": [
-        "List ALL actions identified - use ODRL standard actions where possible",
-        "Examples: use, transfer, distribute, read, modify, delete, sell"
-      ],
-      
-      "permissions": [
+        This prompt instructs the LLM to:
+        1. Avoid creating duplicate constraints in permissions and prohibitions
+        2. Use logical reasoning to determine correct constraint placement
+        3. Prefer positive framing (permissions) over negative framing
+        4. Ensure each constraint appears only once
+        """
+        return f"""
+        Synthesize all previous analyses into comprehensive, structured ODRL components.
+        
+        RULE CONTEXT:
+        - Rule Name: {rule_name}
+        - Framework: {framework_type}
+        - Type: {restriction_condition}
+        
+        ORIGINAL GUIDANCE TEXT:
+        {guidance_text}
+        
+        ANALYSIS STAGES COMPLETED:
+        
+        STAGE 1 - COMPREHENSIVE ANALYSIS:
+        {initial_analysis}
+        
+        STAGE 2 - ODRL COMPONENT EXTRACTION:
+        {odrl_extraction}
+        
+        STAGE 3 - CONSTRAINT ANALYSIS:
+        {constraint_analysis}
+        
+        STAGE 4 - DATA CATEGORY IDENTIFICATION:
+        {data_categories}
+        
+        ═══════════════════════════════════════════════════════════════════════════════
+        CRITICAL LOGICAL CONSISTENCY REQUIREMENTS
+        ═══════════════════════════════════════════════════════════════════════════════
+        
+        1. AVOID DUPLICATION: A constraint should appear in EITHER permissions OR prohibitions, NOT both.
+           
+           ❌ WRONG:
+           Permission:   requestor eq "UK NCA"     (allowed if UK NCA)
+           Prohibition:  requestor neq "UK NCA"    (forbidden if not UK NCA)
+           → These are logically the SAME rule expressed differently!
+           
+           ✅ CORRECT:
+           Permission:   requestor eq "UK NCA"     (allowed if UK NCA)
+           Prohibition:  [empty]
+           → Single, clear rule
+        
+        2. LOGICAL REASONING FRAMEWORK:
+           
+           When you see: "Data sharing IS PERMITTED if requestor is X"
+           → Create: PERMISSION with constraint (leftOperand eq X)
+           → Do NOT create: PROHIBITION with constraint (leftOperand neq X)
+           
+           When you see: "Data sharing IS PROHIBITED if requestor is NOT X"
+           → Reframe as: PERMISSION with constraint (leftOperand eq X)
+           → This is clearer for enforcement systems
+           
+           When you see: "Action Y is absolutely PROHIBITED for all cases"
+           → Create: PROHIBITION without inverse permission
+           → Example: "Data selling is prohibited" → Prohibition only
+        
+        3. OPERATOR LOGIC:
+           - Use "eq" in permissions for positive matching
+           - Use "neq" ONLY in prohibitions for exclusions
+           - Use "isAnyOf" in permissions for allowed sets
+           - Use "isNoneOf" ONLY in prohibitions for forbidden sets
+           
+           EXAMPLES:
+           
+           Example 1 - Conditional Permission (BEST PRACTICE)
+           ──────────────────────────────────────────────────
+           Guidance: "Data sharing is permitted if requestor is UK NCA"
+           
+           ✅ CORRECT:
+           {{
+             "permissions": [{{
+               "action": "distribute",
+               "constraint": [{{"leftOperand": "requestor", "operator": "eq", "rightOperand": "UK NCA"}}],
+               "description": "Data sharing allowed for UK NCA"
+             }}],
+             "prohibitions": []
+           }}
+           → Clear permission with positive constraint
+           
+           ❌ WRONG:
+           {{
+             "permissions": [{{
+               "action": "distribute",
+               "constraint": [{{"leftOperand": "requestor", "operator": "eq", "rightOperand": "UK NCA"}}]
+             }}],
+             "prohibitions": [{{
+               "action": "distribute",
+               "constraint": [{{"leftOperand": "requestor", "operator": "neq", "rightOperand": "UK NCA"}}]
+             }}]
+           }}
+           → DUPLICATION! Both express the same rule
+           
+           Example 2 - Set-Based Permission
+           ──────────────────────────────────────────────────
+           Guidance: "Transfer permitted to EU countries only"
+           
+           ✅ CORRECT:
+           {{
+             "permissions": [{{
+               "action": "transfer",
+               "constraint": [{{"leftOperand": "recipient", "operator": "isAnyOf", "rightOperand": ["EU_countries"]}}],
+               "description": "Transfer allowed to EU member states"
+             }}],
+             "prohibitions": []
+           }}
+           → Positive set constraint in permission only
+           
+           ❌ WRONG:
+           {{
+             "permissions": [{{
+               "action": "transfer",
+               "constraint": [{{"leftOperand": "recipient", "operator": "isAnyOf", "rightOperand": ["EU_countries"]}}]
+             }}],
+             "prohibitions": [{{
+               "action": "transfer",
+               "constraint": [{{"leftOperand": "recipient", "operator": "isNoneOf", "rightOperand": ["EU_countries"]}}]
+             }}]
+           }}
+           → DUPLICATION with inverse logic!
+           
+           Example 3 - Absolute Prohibition (RARE)
+           ──────────────────────────────────────────────────
+           Guidance: "Sale of personal data is strictly prohibited"
+           
+           ✅ CORRECT:
+           {{
+             "permissions": [],
+             "prohibitions": [{{
+               "action": "sell",
+               "constraint": [],
+               "description": "Sale of personal data is absolutely prohibited"
+             }}]
+           }}
+           → This is an absolute prohibition, no permission equivalent exists
+           
+           Example 4 - Mixed Rules (Both Valid)
+           ──────────────────────────────────────────────────
+           Guidance: "Data may be shared with partner organizations for research purposes,
+                      but selling data is prohibited."
+           
+           ✅ CORRECT:
+           {{
+             "permissions": [{{
+               "action": "distribute",
+               "constraint": [
+                 {{"leftOperand": "recipient", "operator": "eq", "rightOperand": "partner_organization"}},
+                 {{"leftOperand": "purpose", "operator": "eq", "rightOperand": "research"}}
+               ],
+               "description": "Sharing permitted with partners for research"
+             }}],
+             "prohibitions": [{{
+               "action": "sell",
+               "constraint": [],
+               "description": "Selling data is absolutely prohibited"
+             }}]
+           }}
+           → Different constraints controlling different things - both needed
+        
+        ═══════════════════════════════════════════════════════════════════════════════
+        SYNTHESIS TASK
+        ═══════════════════════════════════════════════════════════════════════════════
+        
+        First, provide your reasoning about permissions vs prohibitions:
+        - List all constraints you identified from the guidance
+        - For EACH constraint, explain whether it should be in permission or prohibition
+        - Explain why no duplications exist in your output
+        - Verify operators are correct for the rule type
+        
+        Then create the complete JSON structure following this format:
+        
         {{
-          "action": "specific ODRL action (e.g., 'distribute', 'use', 'transfer')",
-          "target": "what the action applies to (asset description)",
-          "assigner": "who grants permission (if specified in guidance)",
-          "assignee": "who receives permission (if specified in guidance)",
-          "constraints": [
+          "reasoning": "
+            Constraint Analysis:
+            1. [Constraint description] → Classified as PERMISSION because [reason]
+            2. [Constraint description] → Classified as PROHIBITION because [reason]
+            ...
+            
+            Duplication Check:
+            - No inverse constraints exist across permissions and prohibitions
+            - Each constraint appears exactly once
+            - Operators are semantically appropriate
+          ",
+          
+          "actions": [
+            "List of ODRL actions (use, transfer, distribute, delete, etc.)"
+          ],
+          
+          "permissions": [
             {{
-              "leftOperand": "ODRL left operand (e.g., 'requestor', 'purpose', 'recipient', 'spatial')",
-              "operator": "eq|isAnyOf|isPartOf|gt|lt|etc (choose appropriate POSITIVE operator)",
-              "rightOperand": "value or list of allowed values",
-              "description": "Clear explanation - use phrases like 'permitted if', 'allowed when', 'authorized for'"
+              "action": "odrl_action",
+              "target": "data or asset description",
+              "assigner": "who grants permission",
+              "assignee": "who receives permission",
+              "constraints": [
+                {{
+                  "leftOperand": "constraint_type",
+                  "operator": "eq|isAnyOf|...",
+                  "rightOperand": "value",
+                  "unit": "unit if applicable",
+                  "dataType": "xsd:type",
+                  "description": "plain English"
+                }}
+              ],
+              "duties": [
+                {{
+                  "action": "required_action",
+                  "description": "what must be done"
+                }}
+              ],
+              "description": "Clear description of what's permitted"
             }}
           ],
+          
+          "prohibitions": [
+            {{
+              "action": "prohibited_action",
+              "target": "data or asset description",
+              "assigner": "who sets prohibition",
+              "assignee": "who is prohibited",
+              "constraints": [
+                {{
+                  "leftOperand": "constraint_type",
+                  "operator": "neq|isNoneOf|...",
+                  "rightOperand": "value",
+                  "description": "plain English"
+                }}
+              ],
+              "description": "Clear description of what's forbidden"
+            }}
+          ],
+          
           "duties": [
-            "any obligations that must be fulfilled to exercise this permission"
-          ],
-          "description": "Clear description of this permission in simple English using permissive language"
-        }}
-      ],
-      
-      "prohibitions": [
-        {{
-          "action": "specific ODRL action",
-          "target": "what the action applies to",
-          "assigner": "who sets prohibition (if specified)",
-          "assignee": "who is prohibited (if specified)",
-          "constraints": [
             {{
-              "leftOperand": "ODRL left operand",
-              "operator": "eq|isAnyOf|etc (for absolute prohibitions, NOT inverses of permissions)",
-              "rightOperand": "prohibited value",
-              "description": "Clear explanation - use phrases like 'prohibited when', 'forbidden if', 'not allowed for'"
+              "action": "mandatory_action",
+              "target": "data or asset description",
+              "assignee": "who is responsible",
+              "constraints": [
+                {{
+                  "leftOperand": "constraint_type",
+                  "operator": "operator",
+                  "rightOperand": "value",
+                  "description": "plain English"
+                }}
+              ],
+              "description": "Clear description of obligation"
             }}
           ],
-          "description": "Clear description using prohibitive language - ONLY for constraints NOT already in permissions"
+          
+          "data_categories": [
+            "List of identified data categories"
+          ],
+          
+          "data_subjects": [
+            "Types of data subjects (individuals, customers, patients, etc.)"
+          ],
+          
+          "parties": {{
+            "controllers": ["data controllers identified"],
+            "processors": ["data processors identified"],
+            "assigners": ["entities granting permissions"],
+            "assignees": ["entities receiving permissions"],
+            "third_parties": ["other relevant parties"]
+          }},
+          
+          "purpose": "Primary purpose of processing",
+          "legal_basis": "Legal basis for processing (if mentioned)",
+          
+          "geographic_scope": [
+            "Applicable jurisdictions"
+          ],
+          
+          "evidence_requirements": [
+            "Documentation needed"
+          ],
+          
+          "verification_methods": [
+            "How to verify compliance"
+          ],
+          
+          "confidence_score": 0.0-1.0,
+          
+          "extraction_reasoning": "Brief summary of extraction approach and key decisions made to avoid duplication"
         }}
-      ],
-      
-      "constraints": [
-        {{
-          "leftOperand": "what is being constrained",
-          "operator": "appropriate ODRL operator",
-          "rightOperand": "value or condition",
-          "description": "clear explanation in simple English",
-          "scope": "permission|prohibition|duty"
-        }}
-      ],
-      
-      "data_categories": [
-        "complete list of ALL data categories identified in guidance",
-        "use precise category names from guidance text"
-      ],
-      
-      "data_subjects": [
-        "who the data is about (individuals, customers, employees, patients, etc.)"
-      ],
-      
-      "parties": {{
-        "controllers": ["data controllers identified"],
-        "processors": ["data processors identified"],
-        "assigners": ["entities granting permissions"],
-        "assignees": ["entities receiving permissions"],
-        "third_parties": ["other relevant parties"]
-      }},
-      
-      "extraction_reasoning": "Brief summary of extraction approach and key decisions made to avoid duplication"
-    }}
-    
-    ═══════════════════════════════════════════════════════════════════════════════
-    FINAL VERIFICATION CHECKLIST
-    ═══════════════════════════════════════════════════════════════════════════════
-    
-    Before submitting your response, verify:
-    
-    [ ] Each constraint appears in only ONE place (permissions OR prohibitions)
-    [ ] No inverse/complement constraints exist across permissions and prohibitions
-    [ ] Operators are semantically correct for the rule type
-    [ ] Comments clearly indicate the rule's intent without contradiction
-    [ ] Downstream systems can unambiguously enforce the policy
-    [ ] All constraints from guidance have been extracted
-    [ ] Reasoning section explains classification decisions
-    [ ] No logical contradictions within same rule
-    
-    ═══════════════════════════════════════════════════════════════════════════════
-    
-    Return ONLY the JSON structure with actual extracted data from the guidance.
-    Do NOT include template instructions or placeholder text in the JSON.
-    Ensure all fields contain real, extracted information.
-    """
+        
+        ═══════════════════════════════════════════════════════════════════════════════
+        FINAL VERIFICATION CHECKLIST
+        ═══════════════════════════════════════════════════════════════════════════════
+        
+        Before submitting your response, verify:
+        
+        [ ] Each constraint appears in only ONE place (permissions OR prohibitions)
+        [ ] No inverse/complement constraints exist across permissions and prohibitions
+        [ ] Operators are semantically correct for the rule type
+        [ ] Comments clearly indicate the rule's intent without contradiction
+        [ ] Downstream systems can unambiguously enforce the policy
+        [ ] All constraints from guidance have been extracted
+        [ ] Reasoning section explains classification decisions
+        [ ] No logical contradictions within same rule
+        
+        ═══════════════════════════════════════════════════════════════════════════════
+        
+        Return ONLY the JSON structure with actual extracted data from the guidance.
+        Do NOT include template instructions or placeholder text in the JSON.
+        Ensure all fields contain real, extracted information.
+        """
