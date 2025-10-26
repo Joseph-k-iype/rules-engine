@@ -142,86 +142,75 @@ def extract_constraints(constraint_data: str) -> Dict[str, Any]:
     Analyze constraint structures including nested logical operators.
     
     Args:
-        constraint_data: JSON string of constraint or constraint array
+        constraint_data: JSON string or dict of constraints
         
     Returns:
-        Parsed constraints with structure and evaluation hints
+        Parsed constraints with structure and patterns
     """
     try:
-        constraints = json.loads(constraint_data) if isinstance(constraint_data, str) else constraint_data
+        if isinstance(constraint_data, str):
+            constraints = json.loads(constraint_data)
+        else:
+            constraints = constraint_data
         
         if not isinstance(constraints, list):
             constraints = [constraints]
         
         analyzed = []
         for idx, constraint in enumerate(constraints):
-            analysis = {
+            analyzed.append({
                 "id": f"constraint_{idx}",
-                "type": "simple" if "leftOperand" in constraint else "logical",
-            }
-            
-            if "leftOperand" in constraint:
-                # Simple constraint
-                analysis.update({
-                    "leftOperand": constraint.get("leftOperand"),
-                    "operator": constraint.get("operator"),
-                    "rightOperand": constraint.get("rightOperand"),
-                    "rdfs_comment": constraint.get("rdfs:comment"),
-                    "dataType": constraint.get("dataType")
-                })
-            else:
-                # Logical constraint (and/or/xone)
-                for op in ["and", "or", "xone", "andSequence"]:
-                    if op in constraint:
-                        analysis["logical_operator"] = op
-                        analysis["nested_constraints"] = constraint[op]
-                        break
-            
-            analyzed.append(analysis)
+                "leftOperand": constraint.get("leftOperand"),
+                "operator": constraint.get("operator"),
+                "rightOperand": constraint.get("rightOperand"),
+                "unit": constraint.get("unit"),
+                "dataType": constraint.get("dataType"),
+                "and": constraint.get("and"),
+                "or": constraint.get("or"),
+                "xone": constraint.get("xone")
+            })
         
         return {
             "constraints": analyzed,
             "count": len(analyzed),
-            "has_logical": any(c["type"] == "logical" for c in analyzed)
+            "has_logical_operators": any(c.get("and") or c.get("or") or c.get("xone") for c in analyzed)
         }
     except Exception as e:
-        return {"error": f"Failed to analyze constraints: {str(e)}"}
+        return {"error": f"Failed to extract constraints: {str(e)}"}
 
 
 @tool
 def analyze_rdfs_comments(odrl_json: str) -> Dict[str, Any]:
     """
-    Extract RDFS comments that provide legislative and business context.
+    Extract RDFS comments for semantic context.
     
     Args:
         odrl_json: JSON string of the ODRL policy
         
     Returns:
-        Mapping of components to semantic meanings from comments
+        Mapping of URIs to their rdfs:comment values
     """
     try:
         policy = json.loads(odrl_json) if isinstance(odrl_json, str) else odrl_json
+        comments = {}
         
-        def find_comments(obj, path=""):
-            comments = {}
+        def extract_comments(obj, path=""):
             if isinstance(obj, dict):
+                if "rdfs:comment" in obj:
+                    uri = obj.get("@id", path)
+                    comments[uri] = obj["rdfs:comment"]
                 for key, value in obj.items():
-                    new_path = f"{path}.{key}" if path else key
-                    if key == "rdfs:comment" or key == "comment":
-                        comments[path] = value
-                    elif isinstance(value, (dict, list)):
-                        comments.update(find_comments(value, new_path))
+                    extract_comments(value, f"{path}.{key}" if path else key)
             elif isinstance(obj, list):
-                for idx, item in enumerate(obj):
-                    comments.update(find_comments(item, f"{path}[{idx}]"))
-            return comments
+                for i, item in enumerate(obj):
+                    extract_comments(item, f"{path}[{i}]")
         
-        comments = find_comments(policy)
+        extract_comments(policy)
         
         return {
             "comments": comments,
             "count": len(comments),
-            "paths": list(comments.keys())
+            "analysis": f"Found {len(comments)} RDFS comment(s)"
         }
     except Exception as e:
         return {"error": f"Failed to analyze RDFS comments: {str(e)}"}
@@ -234,172 +223,131 @@ def analyze_rdfs_comments(odrl_json: str) -> Dict[str, Any]:
 @tool
 def analyze_operator(operator: str) -> Dict[str, Any]:
     """
-    Analyze ODRL operator semantics and determine type implications.
+    Analyze ODRL operator and suggest Rego equivalent.
     
     Args:
-        operator: ODRL operator (e.g., 'eq', 'lt', 'gt', 'isAnyOf')
+        operator: ODRL operator (eq, neq, lt, gt, lteq, gteq, etc.)
         
     Returns:
-        Operator semantics, expected types, and Rego equivalent
+        Operator analysis with Rego mapping
     """
     operator_map = {
-        "eq": {
-            "meaning": "equals",
-            "rego": "==",
-            "types": ["string", "number", "boolean"],
-            "description": "Direct equality comparison"
-        },
-        "neq": {
-            "meaning": "not equals",
-            "rego": "!=",
-            "types": ["string", "number", "boolean"],
-            "description": "Direct inequality comparison"
-        },
-        "lt": {
-            "meaning": "less than",
-            "rego": "<",
-            "types": ["number", "temporal"],
-            "description": "Numeric or temporal comparison"
-        },
-        "gt": {
-            "meaning": "greater than",
-            "rego": ">",
-            "types": ["number", "temporal"],
-            "description": "Numeric or temporal comparison"
-        },
-        "lteq": {
-            "meaning": "less than or equal",
-            "rego": "<=",
-            "types": ["number", "temporal"],
-            "description": "Numeric or temporal comparison with equality"
-        },
-        "gteq": {
-            "meaning": "greater than or equal",
-            "rego": ">=",
-            "types": ["number", "temporal"],
-            "description": "Numeric or temporal comparison with equality"
-        },
-        "isAnyOf": {
-            "meaning": "is any of (set membership)",
-            "rego": "in",
-            "types": ["string", "number"],
-            "description": "Check if value is in a set"
-        },
-        "isAllOf": {
-            "meaning": "is all of (subset)",
-            "rego": "custom_function",
-            "types": ["array"],
-            "description": "Check if all values are present"
-        },
-        "isNoneOf": {
-            "meaning": "is none of (exclusion)",
-            "rego": "not in",
-            "types": ["string", "number"],
-            "description": "Check if value is not in a set"
-        }
+        "eq": {"rego": "==", "type_hint": "any", "description": "Equal to"},
+        "neq": {"rego": "!=", "type_hint": "any", "description": "Not equal to"},
+        "lt": {"rego": "<", "type_hint": "numeric/temporal", "description": "Less than"},
+        "gt": {"rego": ">", "type_hint": "numeric/temporal", "description": "Greater than"},
+        "lteq": {"rego": "<=", "type_hint": "numeric/temporal", "description": "Less than or equal"},
+        "gteq": {"rego": ">=", "type_hint": "numeric/temporal", "description": "Greater than or equal"},
+        "isA": {"rego": "==", "type_hint": "type/class", "description": "Is instance of"},
+        "hasPart": {"rego": "in", "type_hint": "array/set", "description": "Contains element"},
+        "isPartOf": {"rego": "in", "type_hint": "array/set", "description": "Is element of"}
     }
     
-    if operator in operator_map:
-        return operator_map[operator]
-    else:
-        return {
-            "meaning": "unknown",
-            "rego": "==",
-            "types": ["unknown"],
-            "description": f"Unknown operator: {operator}"
-        }
+    analysis = operator_map.get(operator, {
+        "rego": "==",
+        "type_hint": "unknown",
+        "description": "Unknown operator"
+    })
+    
+    return {
+        "operator": operator,
+        "rego": analysis["rego"],
+        "type_hint": analysis["type_hint"],
+        "description": analysis["description"]
+    }
 
 
-@tool  
-def analyze_rightOperand(value: str) -> Dict[str, Any]:
+@tool
+def analyze_rightOperand(right_operand: str) -> Dict[str, Any]:
     """
-    Infer data type from rightOperand value format.
+    Infer data type from rightOperand value.
     
     Args:
-        value: The rightOperand value as string
+        right_operand: The right operand value
         
     Returns:
-        Type classification and Rego representation
+        Type analysis with Rego pattern
     """
-    value_str = str(value)
-    
-    # Check for ISO 8601 datetime
-    if re.match(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', value_str):
+    # Temporal patterns
+    if re.match(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', str(right_operand)):
         return {
             "type": "temporal_datetime",
-            "format": "ISO 8601",
-            "rego_type": "string",
-            "rego_function": "time.parse_rfc3339_ns",
-            "pattern": f'time.parse_rfc3339_ns("{value_str}")'
+            "pattern": f'time.parse_rfc3339_ns("{right_operand}")',
+            "rego_function": ["time.parse_rfc3339_ns", "time.now_ns"]
         }
     
-    # Check for ISO 8601 duration
-    if re.match(r'P(\d+Y)?(\d+M)?(\d+D)?(T(\d+H)?(\d+M)?(\d+S)?)?', value_str):
+    if re.match(r'\d{4}-\d{2}-\d{2}', str(right_operand)):
         return {
-            "type": "temporal_duration",
-            "format": "ISO 8601 duration",
-            "rego_type": "string",
-            "rego_function": "time.parse_duration_ns",
-            "pattern": f'time.parse_duration_ns("{value_str}")'
+            "type": "temporal_date",
+            "pattern": f'time.parse_rfc3339_ns("{right_operand}T00:00:00Z")',
+            "rego_function": ["time.parse_rfc3339_ns"]
         }
     
-    # Check for URI
-    if value_str.startswith("http://") or value_str.startswith("https://"):
-        return {
-            "type": "uri",
-            "rego_type": "string",
-            "pattern": f'"{value_str}"'
-        }
-    
-    # Check for number
+    # Numeric
     try:
-        float(value_str)
-        if '.' in value_str:
+        if '.' in str(right_operand):
+            float(right_operand)
             return {
-                "type": "float",
-                "rego_type": "number",
-                "pattern": value_str
+                "type": "numeric_float",
+                "pattern": str(right_operand),
+                "rego_function": []
             }
         else:
+            int(right_operand)
             return {
-                "type": "integer",
-                "rego_type": "number",
-                "pattern": value_str
+                "type": "numeric_int",
+                "pattern": str(right_operand),
+                "rego_function": []
             }
-    except ValueError:
+    except (ValueError, TypeError):
         pass
+    
+    # URI
+    if str(right_operand).startswith("http://") or str(right_operand).startswith("https://"):
+        return {
+            "type": "uri",
+            "pattern": f'"{right_operand}"',
+            "rego_function": []
+        }
+    
+    # Boolean
+    if str(right_operand).lower() in ["true", "false"]:
+        return {
+            "type": "boolean",
+            "pattern": str(right_operand).lower(),
+            "rego_function": []
+        }
     
     # Default to string
     return {
         "type": "string",
-        "rego_type": "string",
-        "pattern": f'"{value_str}"'
+        "pattern": f'"{right_operand}"',
+        "rego_function": []
     }
 
 
 @tool
 def suggest_rego_pattern(constraint: str) -> Dict[str, Any]:
     """
-    Generate Rego code pattern for a specific constraint.
+    Generate Rego code pattern for a constraint.
     
     Args:
-        constraint: JSON string of the constraint
+        constraint: JSON string of constraint
         
     Returns:
-        Rego code pattern with type-safe evaluation
+        Rego code pattern with variables and functions
     """
     try:
         c = json.loads(constraint) if isinstance(constraint, str) else constraint
         
-        left_op = c.get("leftOperand", "input.unknown")
+        left_op = c.get("leftOperand", "")
         operator = c.get("operator", "eq")
-        right_op = c.get("rightOperand")
+        right_op = c.get("rightOperand", "")
         
-        # Analyze types
         op_analysis = analyze_operator(operator)
-        value_analysis = analyze_rightOperand(str(right_op))
+        value_analysis = analyze_rightOperand(right_op)
         
-        # Generate pattern
+        # Generate input reference
         input_ref = f"input.{left_op}" if not left_op.startswith("input.") else left_op
         
         if value_analysis["type"].startswith("temporal"):

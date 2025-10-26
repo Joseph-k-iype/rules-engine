@@ -2,9 +2,16 @@
 LangGraph Workflow for ODRL to Rego Conversion
 Implements a state machine with reflection and self-correction
 """
+import sys
+from pathlib import Path
 from typing import Dict, Any, Literal
+
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
+
+# Add project root to path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 from .agent_state import AgentState, ConversionStage
 from .odrl_agents import (
@@ -165,6 +172,14 @@ def initialize_state(
 ) -> AgentState:
     """
     Initialize the agent state for a new conversion.
+    
+    Args:
+        odrl_json: ODRL policy in JSON-LD format
+        existing_rego: Existing Rego code to append to (optional)
+        max_corrections: Maximum number of correction attempts
+    
+    Returns:
+        Initialized AgentState
     """
     return {
         # Input
@@ -275,6 +290,14 @@ def convert_odrl_to_rego_sync(
 ) -> Dict[str, Any]:
     """
     Synchronous version of ODRL to Rego conversion.
+    
+    Args:
+        odrl_json: ODRL policy in JSON-LD format
+        existing_rego: Existing Rego code to append to (optional)
+        max_corrections: Maximum number of correction attempts
+    
+    Returns:
+        Dictionary with conversion results
     """
     import asyncio
     

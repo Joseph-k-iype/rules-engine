@@ -5,29 +5,21 @@ Integrates with existing config.py for LLM configuration
 """
 import json
 import os
+import sys
 from typing import Dict, Any, List
 from datetime import datetime
+from pathlib import Path
 
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
-# Import existing config
-import sys
-from pathlib import Path
+# Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-try:
-    from src.config import get_openai_client, OPENAI_MODEL
-except ImportError:
-    # Fallback if config.py doesn't exist
-    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
-    
-    def get_openai_client():
-        from openai import OpenAI
-        return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from src.config import OPENAI_MODEL
 
 # Import tools and prompts
 from .react_tools import (
@@ -57,15 +49,11 @@ from ..prompting.odrl_rego_strategies import (
 # Configuration
 # ============================================================================
 
-def get_llm_for_agent(temperature: float = 0):
+def get_llm_for_agent():
     """
     Get LLM instance using existing config.py settings
     """
-    return ChatOpenAI(
-        model=OPENAI_MODEL,
-        temperature=temperature,
-        api_key=os.getenv("OPENAI_API_KEY")
-    )
+    return ChatOpenAI(model=OPENAI_MODEL)
 
 
 # ============================================================================
@@ -76,7 +64,7 @@ def create_odrl_parser_agent():
     """
     Create ReAct agent for ODRL parsing with deep semantic understanding.
     """
-    llm = get_llm_for_agent(temperature=0)
+    llm = get_llm_for_agent()
     
     tools = [
         extract_policy_metadata,
@@ -102,7 +90,7 @@ def create_type_inference_agent():
     """
     Create ReAct agent for type inference from ODRL constraints.
     """
-    llm = get_llm_for_agent(temperature=0)
+    llm = get_llm_for_agent()
     
     tools = [
         analyze_operator,
@@ -128,7 +116,7 @@ def create_rego_generator_agent():
     """
     Create ReAct agent for generating Rego v1 code.
     """
-    llm = get_llm_for_agent(temperature=0)
+    llm = get_llm_for_agent()
     
     tools = [
         suggest_rego_pattern,
@@ -152,7 +140,7 @@ def create_reflection_agent():
     """
     Create ReAct agent for validating generated Rego code.
     """
-    llm = get_llm_for_agent(temperature=0)
+    llm = get_llm_for_agent()
     
     tools = [
         check_rego_syntax
@@ -174,7 +162,7 @@ def create_correction_agent():
     """
     Create ReAct agent for fixing issues in Rego code.
     """
-    llm = get_llm_for_agent(temperature=0)
+    llm = get_llm_for_agent()
     
     tools = [
         check_rego_syntax,

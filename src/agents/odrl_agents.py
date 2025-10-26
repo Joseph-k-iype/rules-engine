@@ -3,11 +3,19 @@ ODRL to Rego Conversion Agents
 Individual agent implementations for the LangGraph workflow
 """
 import json
+import sys
+from pathlib import Path
 from typing import Dict, Any, List
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 
+# Add project root to path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.config import OPENAI_MODEL
 from .agent_state import AgentState, ConversionStage, ODRLComponentAnalysis, RegoValidationResult
 from .rego_prompts import (
     ODRL_PARSER_PROMPT,
@@ -25,8 +33,8 @@ class ODRLParserAgent:
     Uses Chain of Thought reasoning to extract policy components.
     """
     
-    def __init__(self, model: str = "gpt-4o"):
-        self.llm = ChatOpenAI(model=model, temperature=0)
+    def __init__(self):
+        self.llm = ChatOpenAI(model=OPENAI_MODEL)
         self.parser = JsonOutputParser()
     
     def parse_odrl(self, state: AgentState) -> AgentState:
@@ -97,8 +105,8 @@ class TypeInferenceAgent:
     Uses domain knowledge and constraint analysis.
     """
     
-    def __init__(self, model: str = "gpt-4o"):
-        self.llm = ChatOpenAI(model=model, temperature=0)
+    def __init__(self):
+        self.llm = ChatOpenAI(model=OPENAI_MODEL)
     
     def infer_types(self, state: AgentState) -> AgentState:
         """
@@ -169,8 +177,8 @@ class LogicAnalyzerAgent:
     Ensures prohibitions are proper negations of permissions.
     """
     
-    def __init__(self, model: str = "gpt-4o"):
-        self.llm = ChatOpenAI(model=model, temperature=0)
+    def __init__(self):
+        self.llm = ChatOpenAI(model=OPENAI_MODEL)
     
     def analyze_logic(self, state: AgentState) -> AgentState:
         """
@@ -180,77 +188,48 @@ class LogicAnalyzerAgent:
         state["current_stage"] = ConversionStage.LOGIC_ANALYSIS
         
         try:
-            permissions_str = json.dumps(state["permissions"], indent=2)
-            prohibitions_str = json.dumps(state["prohibitions"], indent=2)
+            policy_logic = {
+                "permissions": state["permissions"],
+                "prohibitions": state["prohibitions"],
+                "inferred_types": state["inferred_types"]
+            }
+            
+            logic_str = json.dumps(policy_logic, indent=2)
             
             messages = [
                 SystemMessage(content=LOGIC_ANALYZER_PROMPT),
                 HumanMessage(content=f"""
                 Analyze the logical consistency of this ODRL policy:
                 
-                Permissions:
-                {permissions_str}
+                {logic_str}
                 
-                Prohibitions:
-                {prohibitions_str}
-                
-                Return JSON analysis:
+                Return JSON with:
                 {{
-                    "permission_rules": [
-                        {{
-                            "action": "...",
-                            "conditions": [...],
-                            "structured_logic": "..."
-                        }}
-                    ],
-                    "prohibition_rules": [
-                        {{
-                            "action": "...",
-                            "conditions": [...],
-                            "structured_logic": "..."
-                        }}
-                    ],
-                    "negation_validation": {{
-                        "is_consistent": true/false,
-                        "analysis": "...",
-                        "pairs": [
-                            {{
-                                "permission": "...",
-                                "prohibition": "...",
-                                "is_negation": true/false,
-                                "reasoning": "..."
-                            }}
-                        ]
-                    }},
-                    "logical_issues": [
-                        {{
-                            "severity": "critical|warning|info",
-                            "issue": "...",
-                            "suggestion": "..."
-                        }}
-                    ],
+                    "permission_rules": [...],
+                    "prohibition_rules": [...],
+                    "negation_validation": {{}},
+                    "logical_issues": ["..."],
                     "reasoning": "..."
                 }}
                 """)
             ]
             
             response = self.llm.invoke(messages)
-            result = json.loads(response.content)
+            analysis = json.loads(response.content)
             
-            state["permission_rules"] = result.get("permission_rules", [])
-            state["prohibition_rules"] = result.get("prohibition_rules", [])
-            state["negation_validation"] = result.get("negation_validation", {})
-            state["logical_issues"] = [
-                f"[{issue['severity'].upper()}] {issue['issue']}: {issue['suggestion']}"
-                for issue in result.get("logical_issues", [])
-            ]
+            state["permission_rules"] = analysis.get("permission_rules", [])
+            state["prohibition_rules"] = analysis.get("prohibition_rules", [])
+            state["negation_validation"] = analysis.get("negation_validation", {})
+            state["logical_issues"] = analysis.get("logical_issues", [])
             
             state["reasoning_chain"].append({
                 "stage": "logic_analysis",
-                "reasoning": result.get("reasoning", "")
+                "reasoning": analysis.get("reasoning", "")
             })
             
-            state["messages"].append(f"Logic analysis complete. Found {len(state['logical_issues'])} issues")
+            state["messages"].append(f"Logic analysis complete")
+            if state["logical_issues"]:
+                state["messages"].append(f"Found {len(state['logical_issues'])} issues")
             
         except Exception as e:
             state["error_message"] = f"Logic analysis failed: {str(e)}"
@@ -265,8 +244,8 @@ class RegoGeneratorAgent:
     Agent responsible for generating OPA Rego v1 code from analyzed ODRL policy.
     """
     
-    def __init__(self, model: str = "gpt-4o"):
-        self.llm = ChatOpenAI(model=model, temperature=0)
+    def __init__(self):
+        self.llm = ChatOpenAI(model=OPENAI_MODEL)
         self.parser = StrOutputParser()
     
     def generate_rego(self, state: AgentState) -> AgentState:
@@ -361,8 +340,8 @@ class ReflectionAgent:
     Provides detailed feedback for corrections.
     """
     
-    def __init__(self, model: str = "gpt-4o"):
-        self.llm = ChatOpenAI(model=model, temperature=0)
+    def __init__(self):
+        self.llm = ChatOpenAI(model=OPENAI_MODEL)
     
     def validate_rego(self, state: AgentState) -> AgentState:
         """
@@ -437,8 +416,8 @@ class CorrectionAgent:
     Learns from validation feedback and applies corrections.
     """
     
-    def __init__(self, model: str = "gpt-4o"):
-        self.llm = ChatOpenAI(model=model, temperature=0)
+    def __init__(self):
+        self.llm = ChatOpenAI(model=OPENAI_MODEL)
     
     def correct_rego(self, state: AgentState) -> AgentState:
         """

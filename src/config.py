@@ -2,6 +2,7 @@
 Global configuration for the legislation rules converter.
 """
 import os
+from openai import OpenAI
 
 
 class Config:
@@ -37,6 +38,32 @@ class Config:
     MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB threshold for chunking
 
 
-# Validate API key
+# Export module-level variables for backward compatibility
+OPENAI_MODEL = Config.CHAT_MODEL
+API_KEY = Config.API_KEY
+BASE_URL = Config.BASE_URL
+EMBEDDING_MODEL = Config.EMBEDDING_MODEL
+
+
+def get_openai_client() -> OpenAI:
+    """
+    Get OpenAI client instance with API key from environment.
+    
+    Returns:
+        OpenAI: Configured OpenAI client
+        
+    Raises:
+        ValueError: If OPENAI_API_KEY is not set
+    """
+    if not Config.API_KEY:
+        raise ValueError("OPENAI_API_KEY environment variable is required")
+    
+    return OpenAI(
+        api_key=Config.API_KEY,
+        base_url=Config.BASE_URL
+    )
+
+
+# Validate API key on module import
 if not Config.API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable is required")
