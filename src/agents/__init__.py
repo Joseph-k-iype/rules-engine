@@ -1,21 +1,47 @@
 """
-ODRL to Rego Conversion Agents
-LangGraph ReAct-based multi-agent system for policy conversion
+Enhanced ODRL to Rego Conversion Agents
+Coverage-based approach with Mixture of Experts and AST validation
 """
 
-# ReAct workflow (recommended)
+# Main conversion functions
 from .react_workflow import (
-    convert_odrl_to_rego_react,
+    convert_odrl_to_rego_with_coverage,
     convert_odrl_file_to_rego,
-    create_odrl_parser_agent,
-    create_type_inference_agent,
-    create_rego_generator_agent,
+    consult_experts
+)
+
+# Agent creators
+from .react_workflow import (
+    create_coverage_parser_agent,
+    create_jurisdiction_expert_agent,
+    create_regex_expert_agent,
+    create_type_system_expert_agent,
+    create_logic_expert_agent,
+    create_ast_expert_agent,
+    create_mixture_of_experts_orchestrator,
+    create_coverage_based_rego_generator,
+    create_ast_validation_agent,
     create_reflection_agent,
     create_correction_agent
 )
 
-# ReAct tools
+# Tools
 from .react_tools import (
+    # Coverage tools
+    extract_coverage_and_jurisdictions,
+    extract_custom_original_data,
+    generate_regex_patterns_for_jurisdictions,
+    
+    # AST tools
+    generate_ast_from_policy,
+    validate_ast_logic,
+    traverse_ast_by_coverage,
+    
+    # Enhanced constraint tools
+    extract_and_infer_constraints_with_coverage,
+    generate_coverage_based_rego_rule,
+    
+    # Original tools
     extract_policy_metadata,
     extract_permissions,
     extract_prohibitions,
@@ -30,17 +56,38 @@ from .react_tools import (
 
 __all__ = [
     # Main conversion functions
-    "convert_odrl_to_rego_react",
+    "convert_odrl_to_rego_with_coverage",
     "convert_odrl_file_to_rego",
+    "consult_experts",
     
     # Agent creators
-    "create_odrl_parser_agent",
-    "create_type_inference_agent",
-    "create_rego_generator_agent",
+    "create_coverage_parser_agent",
+    "create_jurisdiction_expert_agent",
+    "create_regex_expert_agent",
+    "create_type_system_expert_agent",
+    "create_logic_expert_agent",
+    "create_ast_expert_agent",
+    "create_mixture_of_experts_orchestrator",
+    "create_coverage_based_rego_generator",
+    "create_ast_validation_agent",
     "create_reflection_agent",
     "create_correction_agent",
     
-    # Tools
+    # Coverage tools
+    "extract_coverage_and_jurisdictions",
+    "extract_custom_original_data",
+    "generate_regex_patterns_for_jurisdictions",
+    
+    # AST tools
+    "generate_ast_from_policy",
+    "validate_ast_logic",
+    "traverse_ast_by_coverage",
+    
+    # Enhanced tools
+    "extract_and_infer_constraints_with_coverage",
+    "generate_coverage_based_rego_rule",
+    
+    # Original tools
     "extract_policy_metadata",
     "extract_permissions",
     "extract_prohibitions",

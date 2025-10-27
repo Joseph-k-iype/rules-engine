@@ -1,463 +1,702 @@
 """
-ReAct Tools for ODRL to Rego Conversion - COMPLETE VERSION
-Includes ALL original tools PLUS intelligent type inference
+Enhanced ReAct Tools for Coverage-Based ODRL to Rego Conversion
+Includes jurisdiction extraction, AST validation, and regex pattern tools
 """
 import json
 import re
-import sys
-from pathlib import Path
 from typing import Dict, Any, List, Optional
-from langchain_core.tools import tool
-from pydantic import BaseModel, Field
-
-# Add project root to path for type inference engine
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-# Try to import type inference engine (graceful fallback if not available)
-try:
-    from src.agents.type_inference_engine import get_type_inference_engine
-    TYPE_INFERENCE_AVAILABLE = True
-except ImportError:
-    TYPE_INFERENCE_AVAILABLE = False
-    print("Warning: Type inference engine not available. Using basic type detection.")
+from langchain.tools import tool
 
 
 # ============================================================================
-# ODRL Parser Tools (ALL ORIGINAL FUNCTIONALITY)
+# Coverage/Jurisdiction Extraction Tools (NEW)
 # ============================================================================
 
-class PolicyMetadata(BaseModel):
-    """Metadata extracted from ODRL policy"""
-    policy_id: str
-    policy_type: str
-    has_permissions: bool
-    has_prohibitions: bool
-    has_obligations: bool
-    permission_count: int
-    prohibition_count: int
-
-
 @tool
-def extract_policy_metadata(odrl_json: str) -> Dict[str, Any]:
+def extract_coverage_and_jurisdictions(odrl_json: str) -> Dict[str, Any]:
     """
-    Extract high-level metadata from an ODRL policy.
+    Extract coverage (countries/jurisdictions) from ODRL policy.
+    Groups rules by jurisdiction + action combinations.
     
     Args:
         odrl_json: JSON string of the ODRL policy
         
     Returns:
-        Dictionary with policy ID, type, and structural overview
+        Coverage groups, jurisdiction patterns, and hierarchy
     """
     try:
         policy = json.loads(odrl_json) if isinstance(odrl_json, str) else odrl_json
         
-        # Extract policy ID - can be uid, @id, or policyid
-        policy_id = policy.get("uid") or policy.get("@id") or policy.get("policyid", "unknown")
+        coverage_groups = []
+        jurisdiction_map = {}
+        action_jurisdiction_map = {}
         
-        # Extract policy type
-        policy_type = policy.get("@type", policy.get("policytype", "Set"))
+        # Extract from permissions
+        for perm_idx, perm in enumerate(policy.get("permission", [])):
+            coverage_info = _extract_coverage_from_rule(perm, "permission", perm_idx)
+            if coverage_info:
+                coverage_groups.append(coverage_info)
+                action = perm.get("action", "unknown")
+                if action not in action_jurisdiction_map:
+                    action_jurisdiction_map[action] = []
+                action_jurisdiction_map[action].extend(coverage_info["jurisdictions"])
         
-        # Count rules
-        permissions = policy.get("permission", [])
-        prohibitions = policy.get("prohibition", [])
-        obligations = policy.get("obligation", [])
+        # Extract from prohibitions
+        for prohib_idx, prohib in enumerate(policy.get("prohibition", [])):
+            coverage_info = _extract_coverage_from_rule(prohib, "prohibition", prohib_idx)
+            if coverage_info:
+                coverage_groups.append(coverage_info)
+                action = prohib.get("action", "unknown")
+                if action not in action_jurisdiction_map:
+                    action_jurisdiction_map[action] = []
+                action_jurisdiction_map[action].extend(coverage_info["jurisdictions"])
+        
+        # Build jurisdiction hierarchy
+        hierarchy = _build_jurisdiction_hierarchy(coverage_groups)
+        
+        # Generate regex patterns for jurisdiction matching
+        regex_patterns = _generate_jurisdiction_regex_patterns(coverage_groups)
         
         return {
-            "policy_id": policy_id,
-            "policy_type": policy_type,
-            "has_permissions": len(permissions) > 0,
-            "has_prohibitions": len(prohibitions) > 0,
-            "has_obligations": len(obligations) > 0,
-            "permission_count": len(permissions),
-            "prohibition_count": len(prohibitions),
-            "obligation_count": len(obligations),
-            "has_context": "@context" in policy
+            "coverage_groups": coverage_groups,
+            "action_jurisdiction_map": action_jurisdiction_map,
+            "jurisdiction_hierarchy": hierarchy,
+            "regex_patterns": regex_patterns,
+            "total_jurisdictions": len(set(sum([g["jurisdictions"] for g in coverage_groups], [])))
         }
+    
     except Exception as e:
-        return {"error": f"Failed to extract metadata: {str(e)}"}
+        return {"error": f"Failed to extract coverage: {str(e)}"}
 
 
 @tool
-def extract_permissions(odrl_json: str) -> Dict[str, Any]:
+def extract_custom_original_data(odrl_json: str) -> Dict[str, Any]:
     """
-    Extract all permission rules from ODRL policy with semantic analysis.
+    Extract and map custom:originalData identifiers to rules.
+    These IDs are used to traverse the JSON structure.
     
     Args:
         odrl_json: JSON string of the ODRL policy
         
     Returns:
-        Structured list of permissions with actions, targets, constraints
+        Mapping of original data IDs to rule details
     """
     try:
         policy = json.loads(odrl_json) if isinstance(odrl_json, str) else odrl_json
-        permissions = policy.get("permission", [])
         
-        extracted = []
-        for idx, perm in enumerate(permissions):
-            extracted.append({
-                "id": f"permission_{idx}",
-                "action": perm.get("action"),
-                "target": perm.get("target"),
-                "assignee": perm.get("assignee"),
-                "assigner": perm.get("assigner"),
-                "constraints": perm.get("constraint", []),
-                "duties": perm.get("duty", []),
-                "refinement": perm.get("refinement"),
-                "rdfs_comment": perm.get("rdfs:comment", "")
-            })
+        original_data_map = {}
         
-        return {
-            "permissions": extracted,
-            "count": len(extracted),
-            "analysis": f"Found {len(extracted)} permission rule(s)"
-        }
-    except Exception as e:
-        return {"error": f"Failed to extract permissions: {str(e)}"}
-
-
-@tool
-def extract_prohibitions(odrl_json: str) -> Dict[str, Any]:
-    """
-    Extract all prohibition rules from ODRL policy.
-    
-    Args:
-        odrl_json: JSON string of the ODRL policy
-        
-    Returns:
-        Structured list of prohibitions
-    """
-    try:
-        policy = json.loads(odrl_json) if isinstance(odrl_json, str) else odrl_json
-        prohibitions = policy.get("prohibition", [])
-        
-        extracted = []
-        for idx, prohib in enumerate(prohibitions):
-            extracted.append({
-                "id": f"prohibition_{idx}",
-                "action": prohib.get("action"),
-                "target": prohib.get("target"),
-                "assignee": prohib.get("assignee"),
-                "assigner": prohib.get("assigner"),
-                "constraints": prohib.get("constraint", []),
-                "remedy": prohib.get("remedy"),
-                "rdfs_comment": prohib.get("rdfs:comment", "")
-            })
-        
-        return {
-            "prohibitions": extracted,
-            "count": len(extracted),
-            "analysis": f"Found {len(extracted)} prohibition rule(s)"
-        }
-    except Exception as e:
-        return {"error": f"Failed to extract prohibitions: {str(e)}"}
-
-
-@tool
-def extract_constraints(constraint_data: str) -> Dict[str, Any]:
-    """
-    Analyze constraint structures including nested logical operators.
-    
-    Args:
-        constraint_data: JSON string or dict of constraints
-        
-    Returns:
-        Parsed constraints with structure and patterns
-    """
-    try:
-        if isinstance(constraint_data, str):
-            constraints = json.loads(constraint_data)
-        else:
-            constraints = constraint_data
-        
-        if not isinstance(constraints, list):
-            constraints = [constraints]
-        
-        analyzed = []
-        for idx, constraint in enumerate(constraints):
-            analyzed.append({
-                "id": f"constraint_{idx}",
-                "leftOperand": constraint.get("leftOperand"),
-                "operator": constraint.get("operator"),
-                "rightOperand": constraint.get("rightOperand"),
-                "unit": constraint.get("unit"),
-                "dataType": constraint.get("dataType"),
-                "and": constraint.get("and"),
-                "or": constraint.get("or"),
-                "xone": constraint.get("xone"),
-                "rdfs_comment": constraint.get("rdfs:comment", "")
-            })
-        
-        return {
-            "constraints": analyzed,
-            "count": len(analyzed),
-            "has_logical_operators": any(c.get("and") or c.get("or") or c.get("xone") for c in analyzed)
-        }
-    except Exception as e:
-        return {"error": f"Failed to extract constraints: {str(e)}"}
-
-
-@tool
-def analyze_rdfs_comments(odrl_json: str) -> Dict[str, Any]:
-    """
-    Extract RDFS comments for semantic context.
-    
-    Args:
-        odrl_json: JSON string of the ODRL policy
-        
-    Returns:
-        Mapping of URIs to their rdfs:comment values
-    """
-    try:
-        policy = json.loads(odrl_json) if isinstance(odrl_json, str) else odrl_json
-        comments = {}
-        
-        def extract_comments(obj, path=""):
+        def extract_original_data(obj, path=""):
+            """Recursively extract custom:originalData"""
             if isinstance(obj, dict):
-                if "rdfs:comment" in obj:
-                    uri = obj.get("@id", path)
-                    comments[uri] = obj["rdfs:comment"]
+                if "custom:originalData" in obj:
+                    original_id = obj["custom:originalData"].get("id")
+                    if original_id:
+                        original_data_map[original_id] = {
+                            "data": obj,
+                            "path": path,
+                            "type": obj.get("@type", "unknown")
+                        }
+                
                 for key, value in obj.items():
-                    extract_comments(value, f"{path}.{key}" if path else key)
+                    extract_original_data(value, f"{path}.{key}" if path else key)
+            
             elif isinstance(obj, list):
-                for i, item in enumerate(obj):
-                    extract_comments(item, f"{path}[{i}]")
+                for idx, item in enumerate(obj):
+                    extract_original_data(item, f"{path}[{idx}]")
         
-        extract_comments(policy)
+        extract_original_data(policy)
         
         return {
-            "comments": comments,
-            "count": len(comments),
-            "analysis": f"Found {len(comments)} RDFS comment(s)"
+            "original_data_map": original_data_map,
+            "total_tracked_rules": len(original_data_map),
+            "traversal_guide": "Use IDs to reference specific rules across transformations"
         }
+    
     except Exception as e:
-        return {"error": f"Failed to analyze RDFS comments: {str(e)}"}
-
-
-# ============================================================================
-# Type Inference Tools (ORIGINAL + ENHANCED)
-# ============================================================================
-
-@tool
-def analyze_operator(operator: str) -> Dict[str, Any]:
-    """
-    Analyze ODRL operator and suggest Rego equivalent.
-    
-    Args:
-        operator: ODRL operator (eq, neq, lt, gt, lteq, gteq, etc.)
-        
-    Returns:
-        Operator analysis with Rego mapping
-    """
-    operator_map = {
-        "eq": {"rego": "==", "type_hint": "any", "description": "Equal to"},
-        "neq": {"rego": "!=", "type_hint": "any", "description": "Not equal to"},
-        "lt": {"rego": "<", "type_hint": "numeric/temporal", "description": "Less than"},
-        "gt": {"rego": ">", "type_hint": "numeric/temporal", "description": "Greater than"},
-        "lteq": {"rego": "<=", "type_hint": "numeric/temporal", "description": "Less than or equal"},
-        "gteq": {"rego": ">=", "type_hint": "numeric/temporal", "description": "Greater than or equal"},
-        "isA": {"rego": "==", "type_hint": "type/class", "description": "Is instance of"},
-        "isAnyOf": {"rego": "in", "type_hint": "set", "description": "Is any of"},
-        "isAllOf": {"rego": "all", "type_hint": "set", "description": "Is all of"},
-        "isNoneOf": {"rego": "not in", "type_hint": "set", "description": "Is none of"},
-        "hasPart": {"rego": "in", "type_hint": "array/set", "description": "Contains element"},
-        "isPartOf": {"rego": "in", "type_hint": "array/set", "description": "Is element of"}
-    }
-    
-    analysis = operator_map.get(operator, {
-        "rego": "==",
-        "type_hint": "unknown",
-        "description": "Unknown operator"
-    })
-    
-    return {
-        "operator": operator,
-        "rego": analysis["rego"],
-        "type_hint": analysis["type_hint"],
-        "description": analysis["description"]
-    }
+        return {"error": f"Failed to extract original data: {str(e)}"}
 
 
 @tool
-def analyze_rightOperand(right_operand: str) -> Dict[str, Any]:
+def generate_regex_patterns_for_jurisdictions(jurisdictions: str) -> Dict[str, str]:
     """
-    Infer data type from rightOperand value.
+    Generate regex patterns for matching jurisdictions and their hierarchies.
+    Supports partial matching and hierarchical jurisdiction structures.
     
     Args:
-        right_operand: The right operand value
+        jurisdictions: JSON string list of jurisdictions
         
     Returns:
-        Type analysis with Rego pattern
-    """
-    # Temporal patterns
-    if re.match(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', str(right_operand)):
-        return {
-            "type": "temporal_datetime",
-            "pattern": f'time.parse_rfc3339_ns("{right_operand}")',
-            "rego_function": ["time.parse_rfc3339_ns", "time.now_ns"]
-        }
-    
-    if re.match(r'\d{4}-\d{2}-\d{2}$', str(right_operand)):
-        return {
-            "type": "temporal_date",
-            "pattern": f'time.parse_rfc3339_ns("{right_operand}T00:00:00Z")',
-            "rego_function": ["time.parse_rfc3339_ns"]
-        }
-    
-    # Duration pattern (ISO 8601)
-    if re.match(r'^P(\d+Y)?(\d+M)?(\d+D)?(T(\d+H)?(\d+M)?(\d+S)?)?$', str(right_operand)):
-        return {
-            "type": "temporal_duration",
-            "pattern": f'time.parse_duration_ns("{right_operand}")',
-            "rego_function": ["time.parse_duration_ns"]
-        }
-    
-    # Numeric
-    try:
-        if '.' in str(right_operand):
-            float(right_operand)
-            return {
-                "type": "numeric_float",
-                "pattern": str(right_operand),
-                "rego_function": []
-            }
-        else:
-            int(right_operand)
-            return {
-                "type": "numeric_int",
-                "pattern": str(right_operand),
-                "rego_function": []
-            }
-    except (ValueError, TypeError):
-        pass
-    
-    # URI
-    if str(right_operand).startswith("http://") or str(right_operand).startswith("https://"):
-        return {
-            "type": "uri",
-            "pattern": f'"{right_operand}"',
-            "rego_function": []
-        }
-    
-    # Boolean
-    if str(right_operand).lower() in ["true", "false"]:
-        return {
-            "type": "boolean",
-            "pattern": str(right_operand).lower(),
-            "rego_function": []
-        }
-    
-    # Default to string
-    return {
-        "type": "string",
-        "pattern": f'"{right_operand}"',
-        "rego_function": []
-    }
-
-
-@tool
-def suggest_rego_pattern(constraint: str) -> Dict[str, Any]:
-    """
-    Generate Rego code pattern for a constraint.
-    
-    Args:
-        constraint: JSON string of constraint
-        
-    Returns:
-        Rego code pattern with variables and functions
+        Regex patterns for each jurisdiction and common patterns
     """
     try:
-        c = json.loads(constraint) if isinstance(constraint, str) else constraint
+        jurisdiction_list = json.loads(jurisdictions) if isinstance(jurisdictions, str) else jurisdictions
         
-        left_op = c.get("leftOperand", "")
-        operator = c.get("operator", "eq")
-        right_op = c.get("rightOperand", "")
+        patterns = {}
         
-        op_analysis = analyze_operator(operator)
-        value_analysis = analyze_rightOperand(right_op)
+        for jurisdiction in jurisdiction_list:
+            # Exact match pattern
+            patterns[f"{jurisdiction}_exact"] = f"^{re.escape(jurisdiction)}$"
+            
+            # Prefix match for hierarchical (e.g., "US" matches "US:CA", "US:NY")
+            patterns[f"{jurisdiction}_prefix"] = f"^{re.escape(jurisdiction)}:"
+            
+            # Contains match (flexible)
+            patterns[f"{jurisdiction}_contains"] = f".*{re.escape(jurisdiction)}.*"
+            
+            # Case-insensitive match
+            patterns[f"{jurisdiction}_case_insensitive"] = f"(?i)^{re.escape(jurisdiction)}$"
         
-        # Generate input reference
-        input_ref = f"input.{left_op}" if not left_op.startswith("input.") else left_op
-        
-        # Handle different value types
-        if value_analysis["type"].startswith("temporal"):
-            if operator in ["lt", "lteq"]:
-                pattern = f'time.now_ns() {op_analysis["rego"]} {value_analysis["pattern"]}'
-            else:
-                pattern = f'{value_analysis["pattern"]} {op_analysis["rego"]} time.now_ns()'
-        elif isinstance(right_op, list):
-            # Handle sets/arrays
-            formatted_values = ', '.join([f'"{v}"' if isinstance(v, str) else str(v) for v in right_op])
-            pattern = f'{input_ref} in {{{formatted_values}}}'
-        else:
-            pattern = f'{input_ref} {op_analysis["rego"]} {value_analysis["pattern"]}'
+        # Common patterns
+        patterns["any_us_state"] = r"^US:[A-Z]{2}$"
+        patterns["any_eu_country"] = r"^EU:[A-Z]{2}$"
+        patterns["any_country_code"] = r"^[A-Z]{2}$"
+        patterns["hierarchical"] = r"^[A-Z]{2}(:[A-Z0-9_]+)*$"
         
         return {
-            "rego_pattern": pattern,
-            "variables": [input_ref],
-            "functions": value_analysis.get("rego_function", [])
+            "patterns": patterns,
+            "rego_usage": {
+                "exact": 'regex.match(pattern, input.jurisdiction)',
+                "find_all": 'regex.find_all_string_submatch_n(pattern, input.jurisdiction, 1)',
+                "partial": 'regex.find_all_string_submatch_n(pattern, input.jurisdiction, -1)'
+            }
         }
+    
     except Exception as e:
-        return {"error": f"Failed to generate pattern: {str(e)}"}
+        return {"error": f"Failed to generate regex patterns: {str(e)}"}
 
 
 # ============================================================================
-# TYPE INFERENCE TOOLS (NEW - INTELLIGENT TYPE DETECTION)
+# AST Generation and Validation Tools (NEW)
 # ============================================================================
 
 @tool
-def extract_and_infer_constraints(odrl_json: str) -> Dict[str, Any]:
+def generate_ast_from_policy(odrl_json: str) -> Dict[str, Any]:
     """
-    Extract ALL constraints from ODRL policy and infer their data types.
-    Uses intelligent type inference engine if available.
+    Generate Abstract Syntax Tree (AST) from ODRL policy for logical validation.
+    The AST represents the logical structure of permissions, prohibitions, and constraints.
     
     Args:
         odrl_json: JSON string of the ODRL policy
         
     Returns:
-        All constraints with inferred types and Rego recommendations
+        AST representation with nodes for rules, constraints, and logical operations
+    """
+    try:
+        policy = json.loads(odrl_json) if isinstance(odrl_json, str) else odrl_json
+        
+        ast_root = {
+            "node_type": "policy",
+            "node_id": "root",
+            "value": policy.get("@id", "unknown"),
+            "children": [],
+            "parent_id": None,
+            "metadata": {
+                "policy_type": policy.get("@type", "unknown")
+            }
+        }
+        
+        # Process permissions
+        permission_nodes = []
+        for perm_idx, perm in enumerate(policy.get("permission", [])):
+            perm_node = _create_rule_ast_node(perm, "permission", perm_idx, "root")
+            permission_nodes.append(perm_node)
+        
+        # Process prohibitions
+        prohibition_nodes = []
+        for prohib_idx, prohib in enumerate(policy.get("prohibition", [])):
+            prohib_node = _create_rule_ast_node(prohib, "prohibition", prohib_idx, "root")
+            prohibition_nodes.append(prohib_node)
+        
+        ast_root["children"] = permission_nodes + prohibition_nodes
+        
+        # Calculate AST statistics
+        ast_stats = _calculate_ast_statistics(ast_root)
+        
+        return {
+            "ast_tree": ast_root,
+            "statistics": ast_stats,
+            "analysis": "AST generated successfully for logical validation"
+        }
+    
+    except Exception as e:
+        return {"error": f"Failed to generate AST: {str(e)}"}
+
+
+@tool
+def validate_ast_logic(ast_json: str) -> Dict[str, Any]:
+    """
+    Validate logical correctness of AST.
+    Checks for contradictions, missing cases, and logical inconsistencies.
+    
+    Args:
+        ast_json: JSON string of the AST
+        
+    Returns:
+        Validation results with logic correctness score and issues
+    """
+    try:
+        ast = json.loads(ast_json) if isinstance(ast_json, str) else ast_json
+        
+        issues = []
+        traversal_log = []
+        
+        # Traverse AST and validate
+        def traverse_and_validate(node, path=""):
+            current_path = f"{path}/{node['node_id']}"
+            traversal_log.append(f"Visiting: {current_path} (type: {node['node_type']})")
+            
+            # Check for logical issues
+            if node['node_type'] == 'constraint':
+                issue = _validate_constraint_node(node)
+                if issue:
+                    issues.append(issue)
+            
+            elif node['node_type'] in ['permission', 'prohibition']:
+                issue = _validate_rule_node(node)
+                if issue:
+                    issues.append(issue)
+            
+            # Recursively traverse children
+            for child in node.get('children', []):
+                traverse_and_validate(child, current_path)
+        
+        traverse_and_validate(ast)
+        
+        # Check for contradictions between permissions and prohibitions
+        contradiction_issues = _check_permission_prohibition_contradictions(ast)
+        issues.extend(contradiction_issues)
+        
+        # Calculate logic correctness score
+        total_nodes = len(traversal_log)
+        issue_severity_weights = {"critical": 1.0, "warning": 0.5, "info": 0.1}
+        penalty = sum(issue_severity_weights.get(issue.get("severity", "warning"), 0.5) for issue in issues)
+        correctness_score = max(0.0, 1.0 - (penalty / max(total_nodes, 1)))
+        
+        return {
+            "is_valid": len([i for i in issues if i.get("severity") == "critical"]) == 0,
+            "correctness_score": round(correctness_score, 3),
+            "issues": issues,
+            "traversal_log": traversal_log,
+            "total_nodes_validated": total_nodes
+        }
+    
+    except Exception as e:
+        return {"error": f"Failed to validate AST: {str(e)}"}
+
+
+@tool
+def traverse_ast_by_coverage(ast_json: str, jurisdiction: str) -> Dict[str, Any]:
+    """
+    Traverse AST and extract rules applicable to specific jurisdiction.
+    
+    Args:
+        ast_json: JSON string of the AST
+        jurisdiction: Target jurisdiction to filter rules
+        
+    Returns:
+        Rules applicable to the specified jurisdiction
+    """
+    try:
+        ast = json.loads(ast_json) if isinstance(ast_json, str) else ast_json
+        
+        applicable_rules = []
+        
+        def traverse(node):
+            if node['node_type'] in ['permission', 'prohibition']:
+                # Check if rule applies to jurisdiction
+                coverage = node.get('metadata', {}).get('coverage', [])
+                if _matches_jurisdiction(jurisdiction, coverage):
+                    applicable_rules.append({
+                        "rule_type": node['node_type'],
+                        "rule_id": node['node_id'],
+                        "action": node.get('value'),
+                        "coverage": coverage
+                    })
+            
+            for child in node.get('children', []):
+                traverse(child)
+        
+        traverse(ast)
+        
+        return {
+            "jurisdiction": jurisdiction,
+            "applicable_rules": applicable_rules,
+            "rule_count": len(applicable_rules)
+        }
+    
+    except Exception as e:
+        return {"error": f"Failed to traverse AST: {str(e)}"}
+
+
+# ============================================================================
+# Enhanced Type Inference Tools
+# ============================================================================
+
+@tool
+def extract_and_infer_constraints_with_coverage(odrl_json: str) -> Dict[str, Any]:
+    """
+    Extract constraints with type inference AND coverage information.
+    Combines type analysis with jurisdiction-based grouping.
+    
+    Args:
+        odrl_json: JSON string of the ODRL policy
+        
+    Returns:
+        Constraints with inferred types and coverage information
     """
     try:
         policy = json.loads(odrl_json) if isinstance(odrl_json, str) else odrl_json
         
         all_constraints = []
         
-        # Process permissions
+        # Process permissions with coverage
         for perm_idx, perm in enumerate(policy.get("permission", [])):
+            coverage = _extract_coverage_from_rule(perm, "permission", perm_idx)
+            jurisdictions = coverage["jurisdictions"] if coverage else []
+            
             for const_idx, constraint in enumerate(perm.get("constraint", [])):
                 result = _analyze_constraint_with_inference(
-                    constraint, 
+                    constraint,
                     f"permission_{perm_idx}_constraint_{const_idx}",
                     "permission"
                 )
+                result["coverage"] = jurisdictions
+                result["action"] = perm.get("action", "unknown")
                 all_constraints.append(result)
         
-        # Process prohibitions
+        # Process prohibitions with coverage
         for prohib_idx, prohib in enumerate(policy.get("prohibition", [])):
+            coverage = _extract_coverage_from_rule(prohib, "prohibition", prohib_idx)
+            jurisdictions = coverage["jurisdictions"] if coverage else []
+            
             for const_idx, constraint in enumerate(prohib.get("constraint", [])):
                 result = _analyze_constraint_with_inference(
                     constraint,
                     f"prohibition_{prohib_idx}_constraint_{const_idx}",
                     "prohibition"
                 )
+                result["coverage"] = jurisdictions
+                result["action"] = prohib.get("action", "unknown")
                 all_constraints.append(result)
         
-        # Summarize findings
-        type_summary = {}
-        for c in all_constraints:
-            data_type = c.get("inferred_type", "unknown")
-            type_summary[data_type] = type_summary.get(data_type, 0) + 1
+        # Group by coverage + action
+        grouped = {}
+        for constraint in all_constraints:
+            for jurisdiction in constraint.get("coverage", ["GLOBAL"]):
+                action = constraint.get("action", "unknown")
+                key = f"{jurisdiction}:{action}"
+                if key not in grouped:
+                    grouped[key] = []
+                grouped[key].append(constraint)
         
         return {
             "constraints": all_constraints,
-            "total_count": len(all_constraints),
-            "type_summary": type_summary,
-            "analysis": f"Analyzed {len(all_constraints)} constraints with intelligent type inference",
-            "type_inference_available": TYPE_INFERENCE_AVAILABLE
+            "grouped_by_coverage": grouped,
+            "coverage_action_keys": list(grouped.keys()),
+            "total_count": len(all_constraints)
         }
     
     except Exception as e:
-        return {"error": f"Failed to extract and infer constraints: {str(e)}"}
+        return {"error": f"Failed to extract constraints with coverage: {str(e)}"}
+
+
+@tool
+def generate_coverage_based_rego_rule(coverage: str, action: str, constraints_json: str) -> Dict[str, Any]:
+    """
+    Generate a complete Rego rule based on coverage (jurisdiction) and action.
+    Uses regex patterns for jurisdiction matching.
+    
+    Args:
+        coverage: Jurisdiction or jurisdiction pattern (e.g., "US", "US:CA", "EU:*")
+        action: Action name (e.g., "read", "process", "share")
+        constraints_json: JSON string of constraints for this coverage+action combination
+        
+    Returns:
+        Complete Rego rule with coverage-based logic
+    """
+    try:
+        constraints = json.loads(constraints_json) if isinstance(constraints_json, str) else constraints_json
+        
+        # Generate rule name
+        safe_coverage = coverage.replace(":", "_").replace("*", "all")
+        safe_action = action.replace(":", "_")
+        rule_name = f"allow_{safe_action}_{safe_coverage}"
+        
+        # Generate jurisdiction matching logic
+        jurisdiction_check = _generate_jurisdiction_check(coverage)
+        
+        # Generate constraint conditions
+        constraint_conditions = []
+        for constraint in constraints:
+            condition = _generate_constraint_condition(constraint)
+            if condition:
+                constraint_conditions.append(condition)
+        
+        # Build complete rule
+        rule_parts = [
+            f"# Rule for {action} in {coverage}",
+            f"{rule_name} if {{",
+            f"    # Jurisdiction check",
+            f"    {jurisdiction_check}",
+            ""
+        ]
+        
+        if constraint_conditions:
+            rule_parts.append("    # Constraints")
+            for condition in constraint_conditions:
+                rule_parts.append(f"    {condition}")
+        
+        rule_parts.append("}")
+        
+        rule_code = "\n".join(rule_parts)
+        
+        return {
+            "rule_name": rule_name,
+            "rule_code": rule_code,
+            "coverage": coverage,
+            "action": action,
+            "constraint_count": len(constraints)
+        }
+    
+    except Exception as e:
+        return {"error": f"Failed to generate coverage-based rule: {str(e)}"}
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+def _extract_coverage_from_rule(rule: Dict[str, Any], rule_type: str, index: int) -> Optional[Dict[str, Any]]:
+    """Extract coverage/jurisdiction information from a rule"""
+    jurisdictions = []
+    
+    # Look for coverage in constraints
+    for constraint in rule.get("constraint", []):
+        left_op = constraint.get("leftOperand", "")
+        right_op = constraint.get("rightOperand")
+        
+        # Check for jurisdiction/coverage/spatial constraints
+        if any(keyword in left_op.lower() for keyword in ["jurisdiction", "coverage", "spatial", "region", "country"]):
+            if isinstance(right_op, list):
+                jurisdictions.extend(right_op)
+            elif isinstance(right_op, str):
+                jurisdictions.append(right_op)
+    
+    # Look for custom:originalData
+    original_data_id = rule.get("custom:originalData", {}).get("id") if "custom:originalData" in rule else None
+    
+    # Look for spatial or region properties at rule level
+    for key in ["spatial", "region", "jurisdiction", "coverage"]:
+        if key in rule:
+            value = rule[key]
+            if isinstance(value, list):
+                jurisdictions.extend(value)
+            elif isinstance(value, str):
+                jurisdictions.append(value)
+    
+    if not jurisdictions:
+        jurisdictions = ["GLOBAL"]  # Default if no jurisdiction specified
+    
+    return {
+        "rule_type": rule_type,
+        "rule_index": index,
+        "jurisdictions": list(set(jurisdictions)),  # Remove duplicates
+        "action": rule.get("action", "unknown"),
+        "original_data_id": original_data_id
+    }
+
+
+def _build_jurisdiction_hierarchy(coverage_groups: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build hierarchical structure of jurisdictions"""
+    hierarchy = {}
+    
+    for group in coverage_groups:
+        for jurisdiction in group["jurisdictions"]:
+            parts = jurisdiction.split(":")
+            
+            current_level = hierarchy
+            for part in parts:
+                if part not in current_level:
+                    current_level[part] = {}
+                current_level = current_level[part]
+    
+    return hierarchy
+
+
+def _generate_jurisdiction_regex_patterns(coverage_groups: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Generate regex patterns for jurisdiction matching"""
+    patterns = {}
+    all_jurisdictions = set()
+    
+    for group in coverage_groups:
+        all_jurisdictions.update(group["jurisdictions"])
+    
+    for jurisdiction in all_jurisdictions:
+        patterns[jurisdiction] = f"^{re.escape(jurisdiction)}$"
+        patterns[f"{jurisdiction}_hierarchy"] = f"^{re.escape(jurisdiction)}:.*$"
+    
+    return patterns
+
+
+def _create_rule_ast_node(rule: Dict[str, Any], rule_type: str, index: int, parent_id: str) -> Dict[str, Any]:
+    """Create AST node for a rule"""
+    node_id = f"{rule_type}_{index}"
+    
+    node = {
+        "node_type": rule_type,
+        "node_id": node_id,
+        "value": rule.get("action", "unknown"),
+        "children": [],
+        "parent_id": parent_id,
+        "metadata": {
+            "rule_index": index,
+            "target": rule.get("target"),
+            "assignee": rule.get("assignee"),
+            "coverage": _extract_coverage_from_rule(rule, rule_type, index)["jurisdictions"]
+        }
+    }
+    
+    # Add constraint children
+    for const_idx, constraint in enumerate(rule.get("constraint", [])):
+        const_node = {
+            "node_type": "constraint",
+            "node_id": f"{node_id}_constraint_{const_idx}",
+            "value": constraint,
+            "children": [],
+            "parent_id": node_id,
+            "metadata": {
+                "leftOperand": constraint.get("leftOperand"),
+                "operator": constraint.get("operator"),
+                "rightOperand": constraint.get("rightOperand")
+            }
+        }
+        node["children"].append(const_node)
+    
+    return node
+
+
+def _calculate_ast_statistics(ast_root: Dict[str, Any]) -> Dict[str, int]:
+    """Calculate statistics about the AST"""
+    stats = {
+        "total_nodes": 0,
+        "permission_nodes": 0,
+        "prohibition_nodes": 0,
+        "constraint_nodes": 0,
+        "max_depth": 0
+    }
+    
+    def traverse(node, depth=0):
+        stats["total_nodes"] += 1
+        stats["max_depth"] = max(stats["max_depth"], depth)
+        
+        if node["node_type"] == "permission":
+            stats["permission_nodes"] += 1
+        elif node["node_type"] == "prohibition":
+            stats["prohibition_nodes"] += 1
+        elif node["node_type"] == "constraint":
+            stats["constraint_nodes"] += 1
+        
+        for child in node.get("children", []):
+            traverse(child, depth + 1)
+    
+    traverse(ast_root)
+    return stats
+
+
+def _validate_constraint_node(node: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """Validate a constraint node in the AST"""
+    metadata = node.get("metadata", {})
+    left_op = metadata.get("leftOperand")
+    operator = metadata.get("operator")
+    right_op = metadata.get("rightOperand")
+    
+    if not left_op or not operator:
+        return {
+            "severity": "critical",
+            "node_id": node["node_id"],
+            "message": f"Constraint missing leftOperand or operator"
+        }
+    
+    if right_op is None:
+        return {
+            "severity": "warning",
+            "node_id": node["node_id"],
+            "message": f"Constraint has no rightOperand value"
+        }
+    
+    return None
+
+
+def _validate_rule_node(node: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """Validate a rule node in the AST"""
+    if not node.get("value") or node["value"] == "unknown":
+        return {
+            "severity": "critical",
+            "node_id": node["node_id"],
+            "message": f"Rule has no action specified"
+        }
+    
+    if not node.get("children"):
+        return {
+            "severity": "info",
+            "node_id": node["node_id"],
+            "message": f"Rule has no constraints (unconditional)"
+        }
+    
+    return None
+
+
+def _check_permission_prohibition_contradictions(ast: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Check for contradictions between permissions and prohibitions"""
+    issues = []
+    
+    permissions = {}
+    prohibitions = {}
+    
+    def collect_rules(node):
+        if node["node_type"] == "permission":
+            action = node["value"]
+            coverage = tuple(sorted(node["metadata"].get("coverage", [])))
+            key = (action, coverage)
+            permissions[key] = node
+        elif node["node_type"] == "prohibition":
+            action = node["value"]
+            coverage = tuple(sorted(node["metadata"].get("coverage", [])))
+            key = (action, coverage)
+            prohibitions[key] = node
+        
+        for child in node.get("children", []):
+            collect_rules(child)
+    
+    collect_rules(ast)
+    
+    # Check for same action+coverage in both permissions and prohibitions
+    for key in permissions:
+        if key in prohibitions:
+            action, coverage = key
+            issues.append({
+                "severity": "critical",
+                "node_id": f"{permissions[key]['node_id']}_vs_{prohibitions[key]['node_id']}",
+                "message": f"Contradiction: Action '{action}' both permitted and prohibited for coverage {coverage}"
+            })
+    
+    return issues
+
+
+def _matches_jurisdiction(target: str, coverage_list: List[str]) -> bool:
+    """Check if target jurisdiction matches any in coverage list"""
+    for coverage in coverage_list:
+        if coverage == "GLOBAL":
+            return True
+        if target == coverage:
+            return True
+        # Check hierarchical match (e.g., "US:CA" matches "US")
+        if target.startswith(coverage + ":"):
+            return True
+        if coverage.startswith(target + ":"):
+            return True
+    return False
 
 
 def _analyze_constraint_with_inference(
@@ -465,422 +704,106 @@ def _analyze_constraint_with_inference(
     constraint_id: str,
     source: str
 ) -> Dict[str, Any]:
-    """Internal: Analyze a single constraint with type inference"""
-    
+    """Analyze constraint with type inference"""
     left_op = constraint.get("leftOperand")
     operator = constraint.get("operator")
     right_op = constraint.get("rightOperand")
     rdfs_comment = constraint.get("rdfs:comment", "")
     
-    if TYPE_INFERENCE_AVAILABLE:
-        # Use intelligent type inference engine
-        engine = get_type_inference_engine()
-        type_info = engine.infer_type(right_op, left_op, rdfs_comment)
-        rego_expr = engine.generate_rego_expression(left_op, operator, right_op, type_info)
-        
-        return {
-            "id": constraint_id,
-            "source": source,
-            "leftOperand": left_op,
-            "operator": operator,
-            "rightOperand": right_op,
-            "rdfs_comment": rdfs_comment,
-            "inferred_type": type_info["inferred_type"],
-            "rego_type": type_info["rego_type"],
-            "rego_expression": rego_expr["rego_expression"],
-            "explanation": rego_expr["explanation"],
-            "recommended_functions": type_info["recommended_functions"],
-            "requires_parsing": type_info["requires_parsing"]
-        }
-    else:
-        # Fallback to basic type detection
-        basic_type = _basic_type_detection(right_op)
-        basic_pattern = _basic_rego_pattern(left_op, operator, right_op, basic_type)
-        
-        return {
-            "id": constraint_id,
-            "source": source,
-            "leftOperand": left_op,
-            "operator": operator,
-            "rightOperand": right_op,
-            "rdfs_comment": rdfs_comment,
-            "inferred_type": basic_type,
-            "rego_type": basic_type,
-            "rego_expression": basic_pattern,
-            "explanation": f"Basic pattern for {basic_type}",
-            "recommended_functions": [],
-            "requires_parsing": False
-        }
-
-
-def _basic_type_detection(value: Any) -> str:
-    """Basic type detection fallback"""
-    if isinstance(value, bool):
-        return "boolean"
-    elif isinstance(value, int):
-        return "number_int"
-    elif isinstance(value, float):
-        return "number_float"
-    elif isinstance(value, list):
-        return "set_string" if all(isinstance(v, str) for v in value) else "array"
-    elif isinstance(value, str):
-        if re.match(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', value):
-            return "datetime"
-        return "string"
-    return "unknown"
-
-
-def _basic_rego_pattern(left_op: str, operator: str, right_op: Any, data_type: str) -> str:
-    """Generate basic Rego pattern"""
-    input_ref = f"input.{left_op}"
+    # Simple type inference
+    inferred_type = "string"
+    if isinstance(right_op, bool):
+        inferred_type = "boolean"
+    elif isinstance(right_op, int):
+        inferred_type = "integer"
+    elif isinstance(right_op, float):
+        inferred_type = "float"
+    elif isinstance(right_op, list):
+        inferred_type = "array"
+    elif isinstance(right_op, str):
+        if re.match(r'^\d{4}-\d{2}-\d{2}', right_op):
+            inferred_type = "datetime"
+        elif re.match(r'^P\d+[YMWD]', right_op):
+            inferred_type = "duration"
     
-    if data_type == "datetime":
-        return f'time.now_ns() < time.parse_rfc3339_ns("{right_op}")'
-    elif data_type in ["number_int", "number_float"]:
-        op_map = {"eq": "==", "neq": "!=", "lt": "<", "gt": ">", "lteq": "<=", "gteq": ">="}
-        rego_op = op_map.get(operator, "==")
-        return f"{input_ref} {rego_op} {right_op}"
-    elif data_type == "set_string" or isinstance(right_op, list):
+    return {
+        "id": constraint_id,
+        "source": source,
+        "leftOperand": left_op,
+        "operator": operator,
+        "rightOperand": right_op,
+        "rdfs_comment": rdfs_comment,
+        "inferred_type": inferred_type
+    }
+
+
+def _generate_jurisdiction_check(coverage: str) -> str:
+    """Generate Rego code for jurisdiction checking"""
+    if coverage == "GLOBAL":
+        return "true  # Global rule applies to all jurisdictions"
+    
+    if "*" in coverage:
+        # Wildcard pattern
+        pattern = coverage.replace("*", ".*")
+        return f'regex.match("{pattern}", input.jurisdiction)'
+    
+    if ":" in coverage:
+        # Hierarchical jurisdiction - check exact or child jurisdictions
+        return f'(input.jurisdiction == "{coverage}" || startswith(input.jurisdiction, "{coverage}:"))'
+    
+    # Exact match
+    return f'input.jurisdiction == "{coverage}"'
+
+
+def _generate_constraint_condition(constraint: Dict[str, Any]) -> Optional[str]:
+    """Generate Rego condition from constraint"""
+    left_op = constraint.get("leftOperand", "")
+    operator = constraint.get("operator", "")
+    right_op = constraint.get("rightOperand")
+    inferred_type = constraint.get("inferred_type", "string")
+    
+    if not left_op or not operator:
+        return None
+    
+    # Map ODRL operators to Rego
+    operator_map = {
+        "eq": "==",
+        "neq": "!=",
+        "lt": "<",
+        "lteq": "<=",
+        "gt": ">",
+        "gteq": ">=",
+        "isAnyOf": "in",
+        "isNoneOf": "not in"
+    }
+    
+    rego_op = operator_map.get(operator, "==")
+    input_ref = f"input.{left_op}" if not left_op.startswith("input.") else left_op
+    
+    # Format right operand based on type
+    if inferred_type == "datetime":
+        return f'time.now_ns() {rego_op} time.parse_rfc3339_ns("{right_op}")'
+    elif inferred_type in ["integer", "float"]:
+        return f'{input_ref} {rego_op} {right_op}'
+    elif inferred_type == "boolean":
+        return f'{input_ref} {rego_op} {str(right_op).lower()}'
+    elif inferred_type == "array":
         values = ', '.join([f'"{v}"' if isinstance(v, str) else str(v) for v in right_op])
-        return f'{input_ref} in {{{values}}}'
+        return f'{input_ref} {rego_op} {{{values}}}'
     else:
-        return f'{input_ref} == "{right_op}"'
+        return f'{input_ref} {rego_op} "{right_op}"'
 
 
-@tool
-def infer_constraint_type(constraint_json: str) -> Dict[str, Any]:
-    """
-    Infer the data type of a single constraint.
-    
-    Args:
-        constraint_json: JSON string of a single constraint
-        
-    Returns:
-        Detailed type inference result
-    """
-    try:
-        constraint = json.loads(constraint_json) if isinstance(constraint_json, str) else constraint_json
-        
-        left_op = constraint.get("leftOperand")
-        right_op = constraint.get("rightOperand")
-        rdfs_comment = constraint.get("rdfs:comment", "")
-        
-        if TYPE_INFERENCE_AVAILABLE:
-            engine = get_type_inference_engine()
-            type_info = engine.infer_type(right_op, left_op, rdfs_comment)
-            
-            return {
-                "leftOperand": left_op,
-                "rightOperand": right_op,
-                "inferred_type": type_info["inferred_type"],
-                "rego_type": type_info["rego_type"],
-                "recommended_functions": type_info["recommended_functions"],
-                "comparison_operators": type_info["comparison_operators"],
-                "requires_parsing": type_info["requires_parsing"],
-                "reasoning": f"Inferred as {type_info['inferred_type']} based on value analysis"
-            }
-        else:
-            basic_type = _basic_type_detection(right_op)
-            return {
-                "leftOperand": left_op,
-                "rightOperand": right_op,
-                "inferred_type": basic_type,
-                "rego_type": basic_type,
-                "recommended_functions": [],
-                "comparison_operators": ["eq", "neq"],
-                "requires_parsing": False,
-                "reasoning": f"Basic detection: {basic_type}"
-            }
-    
-    except Exception as e:
-        return {"error": f"Failed to infer type: {str(e)}"}
-
-
-@tool
-def generate_typed_rego_pattern(constraint_json: str) -> Dict[str, Any]:
-    """
-    Generate Rego pattern with appropriate data type handling.
-    
-    Args:
-        constraint_json: JSON string of a constraint with actual values
-        
-    Returns:
-        Rego pattern with correct type handling
-    """
-    try:
-        constraint = json.loads(constraint_json) if isinstance(constraint_json, str) else constraint_json
-        
-        left_op = constraint.get("leftOperand")
-        operator = constraint.get("operator")
-        right_op = constraint.get("rightOperand")
-        rdfs_comment = constraint.get("rdfs:comment", "")
-        
-        if TYPE_INFERENCE_AVAILABLE:
-            engine = get_type_inference_engine()
-            type_info = engine.infer_type(right_op, left_op, rdfs_comment)
-            rego_expr = engine.generate_rego_expression(left_op, operator, right_op, type_info)
-            
-            return {
-                "rego_pattern": rego_expr["rego_expression"],
-                "comment": f"# {rego_expr['explanation']}",
-                "inferred_type": type_info["inferred_type"],
-                "actual_value": right_op,
-                "type_reasoning": f"Detected {type_info['inferred_type']} - using {rego_expr['type']} pattern"
-            }
-        else:
-            # Fallback
-            basic_type = _basic_type_detection(right_op)
-            basic_pattern = _basic_rego_pattern(left_op, operator, right_op, basic_type)
-            
-            return {
-                "rego_pattern": basic_pattern,
-                "comment": f"# Basic pattern for {basic_type}",
-                "inferred_type": basic_type,
-                "actual_value": right_op,
-                "type_reasoning": f"Basic detection: {basic_type}"
-            }
-    
-    except Exception as e:
-        return {"error": f"Failed to generate pattern: {str(e)}"}
-
-
-@tool
-def generate_complete_typed_rule(rule_json: str) -> Dict[str, Any]:
-    """
-    Generate a complete Rego rule with proper type handling for all constraints.
-    
-    Args:
-        rule_json: JSON string with rule type, action, and constraints
-        
-    Returns:
-        Complete Rego rule with typed constraints
-    """
-    try:
-        rule = json.loads(rule_json) if isinstance(rule_json, str) else rule_json
-        
-        rule_type = rule.get("type", "allow")
-        action = rule.get("action", "")
-        constraints = rule.get("constraints", [])
-        
-        lines = []
-        lines.append(f"# Rule: {rule_type} {action}")
-        
-        constraint_patterns = []
-        for constraint in constraints:
-            result = generate_typed_rego_pattern(json.dumps(constraint))
-            if "error" not in result:
-                constraint_patterns.append({
-                    "pattern": result["rego_pattern"],
-                    "comment": result["comment"],
-                    "type": result["inferred_type"]
-                })
-        
-        # Add comments
-        for cp in constraint_patterns:
-            lines.append(cp["comment"])
-        
-        # Add rule definition
-        rule_keyword = "allow" if rule_type == "allow" else "deny"
-        lines.append(f"{rule_keyword} if {{")
-        
-        # Add action check
-        if action:
-            action_value = action.split("/")[-1] if "/" in action else action
-            lines.append(f'    input.action == "{action_value}"')
-        
-        # Add constraint patterns
-        for cp in constraint_patterns:
-            lines.append(f"    {cp['pattern']}")
-        
-        lines.append("}")
-        
-        return {
-            "rego_code": "\n".join(lines),
-            "constraint_count": len(constraint_patterns),
-            "types_used": [cp["type"] for cp in constraint_patterns],
-            "uses_intelligent_typing": TYPE_INFERENCE_AVAILABLE
-        }
-    
-    except Exception as e:
-        return {"error": f"Failed to generate rule: {str(e)}"}
-
-
-@tool
-def generate_type_inference_report(odrl_json: str) -> Dict[str, Any]:
-    """
-    Generate a comprehensive type inference report for all constraints.
-    
-    Args:
-        odrl_json: JSON string of the ODRL policy
-        
-    Returns:
-        Detailed report of type inference for all constraints
-    """
-    try:
-        result = extract_and_infer_constraints(odrl_json)
-        
-        if "error" in result:
-            return result
-        
-        constraints = result.get("constraints", [])
-        
-        # Group by type
-        by_type = {}
-        for c in constraints:
-            t = c.get("inferred_type", "unknown")
-            if t not in by_type:
-                by_type[t] = []
-            by_type[t].append({
-                "leftOperand": c.get("leftOperand"),
-                "rightOperand": c.get("rightOperand"),
-                "rego_expression": c.get("rego_expression")
-            })
-        
-        # Create report
-        report_lines = [
-            "# Type Inference Report",
-            f"# Total Constraints: {len(constraints)}",
-            f"# Type Inference Engine: {'Available' if TYPE_INFERENCE_AVAILABLE else 'Not Available (using fallback)'}",
-            "",
-            "## Types Detected:",
-        ]
-        
-        for dtype, instances in by_type.items():
-            report_lines.append(f"\n### {dtype.upper()} ({len(instances)} instances)")
-            for inst in instances[:5]:  # Show first 5
-                report_lines.append(f"  - {inst['leftOperand']}: {inst['rightOperand']}")
-                report_lines.append(f"    Rego: {inst['rego_expression']}")
-            if len(instances) > 5:
-                report_lines.append(f"  ... and {len(instances) - 5} more")
-        
-        return {
-            "report": "\n".join(report_lines),
-            "types_found": list(by_type.keys()),
-            "type_counts": {k: len(v) for k, v in by_type.items()},
-            "type_inference_available": TYPE_INFERENCE_AVAILABLE
-        }
-    
-    except Exception as e:
-        return {"error": f"Failed to generate report: {str(e)}"}
-
-
-# ============================================================================
-# Rego Validation Tools (ORIGINAL FUNCTIONALITY)
-# ============================================================================
-
-@tool
-def check_rego_syntax(rego_code: str) -> Dict[str, Any]:
-    """
-    Check Rego code for syntax compliance with Rego v1.
-    
-    Args:
-        rego_code: The Rego code to validate
-        
-    Returns:
-        Syntax validation results with errors and suggestions
-    """
-    errors = []
-    suggestions = []
-    
-    # Check for import rego.v1
-    if "import rego.v1" not in rego_code:
-        errors.append({
-            "line": 1,
-            "error": "Missing 'import rego.v1' statement",
-            "suggestion": "Add 'import rego.v1' after package declaration"
-        })
-    
-    # Check for 'if' keywords in rules
-    lines = rego_code.split('\n')
-    for idx, line in enumerate(lines, 1):
-        stripped = line.strip()
-        
-        # Check if line looks like a rule definition without 'if'
-        if ':=' in stripped or '=' in stripped:
-            if '{' in stripped and 'if' not in stripped:
-                # Skip default declarations, package, import
-                if not any(stripped.startswith(x) for x in ['default ', 'package ', 'import ']):
-                    errors.append({
-                        "line": idx,
-                        "error": f"Rule definition missing 'if' keyword (Rego v1 requirement)",
-                        "suggestion": f"Add 'if' before '{{' on line {idx}"
-                    })
-    
-    # Check for 'contains' in set rules
-    for idx, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if re.match(r'^\w+\s+\w+\s+if\s+{', stripped):
-            if 'contains' not in stripped:
-                suggestions.append({
-                    "line": idx,
-                    "suggestion": "Consider using 'contains' for multi-value rules"
-                })
-    
-    return {
-        "is_valid": len(errors) == 0,
-        "errors": errors,
-        "suggestions": suggestions,
-        "error_count": len(errors)
-    }
-
-
-@tool
-def fix_missing_if(rego_code: str) -> Dict[str, Any]:
-    """
-    Automatically add missing 'if' keywords to Rego code.
-    
-    Args:
-        rego_code: The Rego code to fix
-        
-    Returns:
-        Corrected code with 'if' keywords added
-    """
-    lines = rego_code.split('\n')
-    fixed_lines = []
-    changes = []
-    
-    for idx, line in enumerate(lines, 1):
-        stripped = line.strip()
-        
-        # Check if this is a rule that needs 'if'
-        if ((':=' in stripped or '=' in stripped) and 
-            '{' in stripped and 
-            'if' not in stripped and
-            not stripped.startswith('default ') and
-            not stripped.startswith('package ') and
-            not stripped.startswith('import ')):
-            
-            # Add 'if' before '{'
-            fixed_line = line.replace('{', 'if {')
-            fixed_lines.append(fixed_line)
-            changes.append(f"Line {idx}: Added 'if' keyword")
-        else:
-            fixed_lines.append(line)
-    
-    return {
-        "corrected_code": '\n'.join(fixed_lines),
-        "changes": changes,
-        "change_count": len(changes)
-    }
-
-
-# Export all tools
-__all__ = [
-    # Original tools
-    "extract_policy_metadata",
-    "extract_permissions",
-    "extract_prohibitions",
-    "extract_constraints",
-    "analyze_rdfs_comments",
-    "analyze_operator",
-    "analyze_rightOperand",
-    "suggest_rego_pattern",
-    "check_rego_syntax",
-    "fix_missing_if",
-    # New type inference tools
-    "extract_and_infer_constraints",
-    "infer_constraint_type",
-    "generate_typed_rego_pattern",
-    "generate_complete_typed_rule",
-    "generate_type_inference_report"
-]
+# Re-export original tools for backward compatibility
+from .react_tools import (
+    extract_policy_metadata,
+    extract_permissions,
+    extract_prohibitions,
+    extract_constraints,
+    analyze_rdfs_comments,
+    analyze_operator,
+    analyze_rightOperand,
+    suggest_rego_pattern,
+    check_rego_syntax,
+    fix_missing_if
+)

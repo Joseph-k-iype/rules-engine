@@ -1,631 +1,809 @@
 """
-ODRL to Rego Conversion Prompting Strategies - COMPLETE VERSION
-Includes ALL original prompts PLUS intelligent type inference instructions
-FIXED: Uses f-strings to avoid .format() KeyError
+Enhanced Prompting Strategies for Coverage-Based ODRL to Rego Conversion
+Includes Chain of Thought, Mixture of Experts, and Reflection patterns
+Uses OpenAI o3-mini reasoning model capabilities
 """
 
 # ============================================================================
-# ODRL CONTEXT AND STRUCTURE GUIDE
+# ODRL Structure Context
 # ============================================================================
 
 ODRL_STRUCTURE_CONTEXT = """
-# ODRL JSON-LD Structure Context
+## ODRL Policy Structure
 
-ODRL policies follow the W3C ODRL 2.2 specification and use JSON-LD format.
-This context explains the structure and how to extract actual values with proper type inference.
+ODRL policies contain:
+- **Permissions**: Actions that are ALLOWED
+- **Prohibitions**: Actions that are FORBIDDEN
+- **Obligations**: Actions that MUST be performed
+- **Constraints**: Conditions on permissions/prohibitions
+  - leftOperand: Property being constrained
+  - operator: Comparison operator (eq, lt, gt, isAnyOf, etc.)
+  - rightOperand: Value or set of values
 
-## Core Components
+**Coverage/Jurisdiction**: Rules may apply to specific jurisdictions (countries, regions)
+- Can be specified in constraints or custom properties
+- May be hierarchical (e.g., "US" > "US:CA" > "US:CA:SF")
+- May use patterns (e.g., "US:*" for all US states)
 
-1. **Policy Container**:
-   - `@context`: JSON-LD context (usually ODRL vocabulary)
-   - `@type` or `policytype`: Policy type (Set, Offer, Agreement, Privacy)
-   - `uid` or `@id` or `policyid`: Unique policy identifier
-
-2. **Rules** (permissions, prohibitions, obligations):
-   - `action`: The action being permitted/prohibited - EXTRACT ACTUAL VALUE
-   - `target`: Asset(s) the rule applies to - EXTRACT ACTUAL VALUE
-   - `assignee`: Party granted permission
-   - `assigner`: Party granting permission
-   - `constraint`: Conditions (array) - **THIS CONTAINS THE ACTUAL VALUES WITH TYPES**
-   - `duty`: Obligations tied to permissions
-   - `remedy`: What must happen if prohibition is violated
-
-3. **Constraints** (THIS IS WHERE ACTUAL VALUES AND TYPES ARE):
-   - `leftOperand`: Property being constrained (e.g., "purpose", "role", "age", "dateTime")
-   - `operator`: Comparison operator (eq, neq, lt, gt, lteq, gteq, isAnyOf, etc.)
-   - `rightOperand`: **THE ACTUAL VALUE TO EXTRACT AND USE WITH PROPER TYPE**
-     * Can be string, number, boolean, date, list, etc.
-     * Type inference is critical here!
-   - `unit`: Unit of measurement (optional)
-   - `dataType`: Explicit type declaration (optional)
-   - `rdfs:comment`: Semantic hints for type inference
-   - Logical operators: `and`, `or`, `xone` for compound constraints
-
-4. **Parties**:
-   - Can be URIs, objects with `@type`, or strings
-   - May include `rdfs:label` for human-readable names
-
-5. **Assets/Targets**:
-   - Can be URIs or objects
-   - May have `rdfs:comment` for context
-
-## Type Inference from rightOperand
-
-The rightOperand value can be many types - DO NOT treat everything as string!
-
-### Temporal Types
-- `"2025-12-31T23:59:59Z"` → datetime → use `time.parse_rfc3339_ns()`
-- `"2025-12-31"` → date → convert to datetime
-- `"P30D"` or `"PT2H"` → duration → use `time.parse_duration_ns()`
-
-### Numeric Types  
-- `18` → integer → use numeric comparison (`>=`, `<`, etc.)
-- `3.14` → float → use numeric comparison
-- DO NOT quote numbers as strings!
-
-### Boolean Types
-- `true` or `false` → boolean → use `==` with boolean value
-
-### Set Types
-- `["value1", "value2"]` → set/array → use `in` operator with set syntax
-
-### Hierarchical Types
-- `"dept:engineering:backend"` → hierarchical → use `startswith()` for parent checks
-- Context from leftOperand ("department", "category") indicates hierarchy
-
-### Pattern Types
-- When rdfs:comment mentions "pattern", "format", "regex" → use `regex.match()`
-
-### URI Types
-- `"http://..."` → URI → string comparison or prefix matching
-
-### Email Types
-- `"user@example.com"` → email → validation or domain checks
+**custom:originalData**: Unique identifier for each rule
+- Used to track rules across transformations
+- Format: {"id": "unique_identifier"}
 """
 
 # ============================================================================
-# ReAct AGENT PROMPTS (COMPLETE WITH TYPE INFERENCE)
+# Chain of Thought (CoT) Reasoning Prompts
 # ============================================================================
 
-ODRL_PARSER_REACT_PROMPT = f"""You are an expert ODRL (Open Digital Rights Language) policy analyst with type inference capabilities.
+COT_REASONING_TEMPLATE = """
+## Chain of Thought Reasoning Process
 
-## Your Task
+You MUST think step-by-step through this multi-stage reasoning process:
 
-Parse and deeply understand ODRL JSON-LD policies using your tools to extract:
-1. Policy metadata and structure
-2. ALL permissions with their ACTUAL actions and constraints  
-3. ALL prohibitions with their ACTUAL actions and constraints
-4. Semantic context from RDFS comments for type inference hints
-5. Custom ODRL extensions
-6. **DATA TYPES of all constraint values**
+**Stage 1: Understanding**
+1. What is the primary objective of this task?
+2. What are the key components I need to identify?
+3. What patterns or structures should I look for?
 
-## ODRL Structure Context
+**Stage 2: Analysis**
+1. What data is present in the input?
+2. How do the components relate to each other?
+3. What are the implicit relationships not explicitly stated?
 
-{ODRL_STRUCTURE_CONTEXT}
+**Stage 3: Inference**
+1. What can I infer from the data?
+2. What are the logical implications?
+3. What edge cases exist?
 
-## Available Tools
+**Stage 4: Validation**
+1. Does my analysis make logical sense?
+2. Are there any contradictions?
+3. What confidence level do I have in my conclusions?
 
-Use these tools systematically:
-- **extract_policy_metadata**: Get policy ID, type, and rule counts
-- **extract_permissions**: Get all permission rules with details
-- **extract_prohibitions**: Get all prohibition rules with details
-- **extract_constraints**: Deep dive into constraint structures
-- **extract_and_infer_constraints**: **PRIMARY TOOL** - Extracts constraints WITH type inference
-- **analyze_rdfs_comments**: Extract semantic context for type hints
-- **generate_type_inference_report**: Get overview of all types detected
+**Stage 5: Synthesis**
+1. How do I combine my findings?
+2. What is the most accurate representation?
+3. What assumptions am I making?
 
-## Chain of Thought Analysis
-
-For each component you extract:
-1. **Identify**: What is this component?
-2. **Extract Value**: What is the ACTUAL value (not placeholder)?
-3. **Infer Type**: What data type is this value?
-4. **Contextualize**: What does rdfs:comment tell us?
-5. **Relate**: How does it connect to other components?
-6. **Legislate**: What legal/business rule does it represent?
-
-## CRITICAL Instructions
-
-1. Extract ALL actual values from the ODRL policy
-2. DO NOT invent, assume, or use placeholder values  
-3. **Infer the DATA TYPE of each rightOperand value**
-4. Use `extract_and_infer_constraints` to get types automatically
-5. Report findings with ACTUAL values AND their inferred types
-
-## Example Output Format
-
-"Found 3 constraints with types:
-
-1. Constraint: dateTime < '2025-12-31T23:59:59Z'
-   Extracted value: '2025-12-31T23:59:59Z'
-   Inferred type: DATETIME (detected ISO 8601 format)
-   Rego recommendation: time.parse_rfc3339_ns()
-   
-2. Constraint: role isAnyOf ['data_controller', 'dpo']
-   Extracted values: ['data_controller', 'dpo']
-   Inferred type: SET_STRING (list of strings)
-   Rego recommendation: input.role in {{'data_controller', 'dpo'}}
-   
-3. Constraint: age >= 18
-   Extracted value: 18
-   Inferred type: NUMBER_INT (integer)
-   Rego recommendation: input.age >= 18"
-
-Focus on understanding what TYPE each constraint value is, not just extracting it as text.
+Document your reasoning at each stage explicitly.
 """
 
-TYPE_INFERENCE_REACT_PROMPT = f"""You are an expert in data type systems, policy constraint analysis, and Rego type semantics.
-
-## Your Task
-
-Infer the correct Rego data types for ALL ODRL constraints and generate type-appropriate patterns.
-
-## ODRL Structure Context
-
-{ODRL_STRUCTURE_CONTEXT}
-
-## Available Tools
-
-Use these systematically:
-- **extract_and_infer_constraints**: **PRIMARY TOOL** - Get constraints with inferred types
-- **infer_constraint_type**: Analyze a specific constraint's type
-- **analyze_operator**: Map ODRL operator to Rego operator
-- **analyze_rightOperand**: Infer type from actual value
-- **generate_typed_rego_pattern**: **KEY TOOL** - Generate Rego with correct type handling
-- **generate_type_inference_report**: Overview of all types
-
-## Type Inference Rules for OPA Rego v1
-
-### Temporal Types
-- ISO 8601 datetime strings → `time.parse_rfc3339_ns()` or `time.parse_duration_ns()`
-- Date strings → Convert to datetime
-- Relative times → `time.now_ns()` with arithmetic
-
-### Numeric Types
-- Integers → Direct numeric comparison (`<`, `>`, `==`, `>=`, `<=`)
-- Floats → Direct numeric comparison
-- **DO NOT quote numbers as strings!**
-
-### Boolean Types
-- `true` / `false` → Boolean comparison
-- **DO NOT quote booleans as strings!**
-
-### Set Types
-- `isAnyOf` with list → Set membership: `input.field in {{actual_values}}`
-- `isAllOf` → Check all elements present
-- `isNoneOf` → Negation of membership
-
-### String Types (when actually strings)
-- Single specific value → Exact match (`==`)
-- Multiple similar values → Pattern match (`regex.match()`)
-- Hierarchical category → Prefix match (`startswith()`)
-- Substring check → Contains match (`contains()`)
-- Case-insensitive → Wrap with `lower()`
-
-## Pattern Generation Process
-
-FOR EACH constraint:
-1. Use `infer_constraint_type` to determine the type
-2. Use `generate_typed_rego_pattern` to get the pattern with correct type handling
-3. Report the type reasoning
-
-## Examples of Type-Aware Generation
-
-### Temporal Type
-Input: `{{"leftOperand": "dateTime", "operator": "lt", "rightOperand": "2025-12-31T23:59:59Z"}}`
-Inferred Type: datetime
-Generated Pattern: `time.now_ns() < time.parse_rfc3339_ns("2025-12-31T23:59:59Z")`
-
-### Numeric Type
-Input: `{{"leftOperand": "age", "operator": "gteq", "rightOperand": 18}}`
-Inferred Type: number_int
-Generated Pattern: `input.age >= 18`  (NOT "18" as string!)
-
-### Set Type
-Input: `{{"leftOperand": "role", "operator": "isAnyOf", "rightOperand": ["admin", "user"]}}`
-Inferred Type: set_string
-Generated Pattern: `input.role in {{"admin", "user"}}`
-
-### Hierarchical Type
-Input: `{{"leftOperand": "department", "operator": "isA", "rightOperand": "eng:backend"}}`
-Inferred Type: hierarchical
-Generated Pattern: `startswith(input.department, "eng:backend")`
-
-## CRITICAL
-
-Always use the TYPE-APPROPRIATE Rego operators and functions!
-Use `generate_typed_rego_pattern` for EACH constraint to ensure correct type handling.
-"""
-
-REGO_GENERATOR_REACT_PROMPT = f"""You are an expert OPA Rego v1 policy author with type-aware code generation capabilities.
-
-## Your Task
-
-Generate complete, syntactically correct, enterprise-scale Rego v1 code using TYPE-AWARE patterns for all constraints.
-
-## ODRL Structure Context
-
-{ODRL_STRUCTURE_CONTEXT}
-
-## Available Tools
-
-- **extract_and_infer_constraints**: Get constraints with inferred types
-- **generate_typed_rego_pattern**: Generate type-aware Rego for each constraint
-- **generate_complete_typed_rule**: **PRIMARY TOOL** - Generate complete rules with typed constraints
-- **check_rego_syntax**: Validate generated code
-- **generate_type_inference_report**: See type distribution
-
-## OPA Rego v1 Requirements (CRITICAL)
-
-1. **MUST use**: `import rego.v1`
-2. **MUST use**: `if` keyword before ALL rule bodies
-3. **MUST use**: `contains` keyword for multi-value rules (sets)
-4. **NO HARDCODING**: Extract ALL values from ODRL policy
-5. **TYPE-AWARE**: Use correct operators and functions for each data type
-
-## Enterprise String Operations - Dynamic Selection
-
-### Decision Tree for Built-in Function Selection:
-
-```
-FOR each constraint in ODRL policy:
-  EXTRACT actual_value = constraint.rightOperand
-  INFER type from value
-  READ rdfs_comment for matching_hints
-  
-  IF type is datetime/date/duration:
-     USE: time.parse_rfc3339_ns() or time.parse_duration_ns()
-     COMPARE: with time.now_ns()
-     
-  ELSE IF type is numeric (int/float):
-     USE: Direct numeric comparison (<, >, ==, >=, <=)
-     DO NOT quote numbers as strings!
-     
-  ELSE IF type is boolean:
-     USE: Boolean comparison (== true/false)
-     DO NOT quote booleans as strings!
-     
-  ELSE IF type is set/array (isAnyOf operator):
-     EXTRACT actual_list from constraint
-     USE: input.field in {{actual_list}}
-     
-  ELSE IF type is hierarchical:
-     USE: startswith(input.field, actual_value)
-     
-  ELSE IF type is pattern (from rdfs:comment):
-     USE: regex.match("pattern", input.field)
-     
-  ELSE IF type is string:
-     USE: input.field == "actual_value"
-```
-
-### Code Generation Process
-
-1. Use `extract_and_infer_constraints` to get ALL constraints with types
-2. For each permission/prohibition, use `generate_complete_typed_rule`
-3. Validate with `check_rego_syntax`
-4. Ensure proper type handling throughout
-
-### Example Code Generation (Using Actual Types):
-
-```rego
-# Permission with TYPE-AWARE constraints
-allow if {{
-    input.action == "use"
-    
-    # TEMPORAL: datetime constraint (detected ISO 8601)
-    time.now_ns() < time.parse_rfc3339_ns("2025-12-31T23:59:59Z")
-    
-    # NUMERIC: age constraint (detected integer)
-    input.age >= 18
-    
-    # SET: role constraint (detected string array)
-    input.role in {{"data_controller", "dpo"}}
-    
-    # HIERARCHICAL: category constraint (detected colon notation)
-    startswith(input.dataCategory, "personal:contact")
-}}
-```
-
-## CRITICAL RULES
-
-❌ **NEVER do this:**
-```rego
-# BAD: Treating numbers as strings
-input.age == "18"
-
-# BAD: Treating dates as strings
-input.dateTime == "2025-12-31T23:59:59Z"
-
-# BAD: Multiple OR conditions instead of set
-input.role == "admin" || input.role == "user"
-```
-
-✅ **ALWAYS do this:**
-```rego
-# GOOD: Numeric comparison
-input.age >= 18
-
-# GOOD: Temporal comparison with time functions
-time.now_ns() < time.parse_rfc3339_ns("2025-12-31T23:59:59Z")
-
-# GOOD: Set membership
-input.role in {{"admin", "user"}}
-```
-
-## Output Format
-
-```rego
-# ==================================================
-# Generated from ODRL Policy: <actual_policy_id>
-# Generated at: <timestamp>
-# All values extracted from ODRL policy with type-aware handling
-# ==================================================
-
-package odrl.policies.<sanitized_policy_id>
-
-import rego.v1
-
-default allow := false
-
-# Permission rules (using TYPE-AWARE constraints)
-allow if {{
-    # Constraints use appropriate types and operators
-    # Temporal uses time.* functions
-    # Numeric uses numeric operators
-    # Sets use 'in' operator
-    # Strings use string operators
-}}
-
-# Prohibition rules (using TYPE-AWARE constraints)
-deny if {{
-    # Same type-aware approach
-}}
-
-# Helper functions (generic, reusable)
-# No hardcoded values
-```
-
-Use `generate_complete_typed_rule` to ensure proper type handling for ALL constraints!
-"""
-
-REFLECTION_REACT_PROMPT = f"""You are a senior OPA Rego code reviewer specializing in policy validation and type correctness.
-
-## Your Task
-
-Critically validate generated Rego code for:
-- **Syntax correctness** (Rego v1 compliance)
-- **Type correctness** (NO string comparisons for numbers/dates/booleans)
-- **Value correctness** (NO hardcoded placeholders)
-- **Logical correctness** (matches ODRL intent)
-- **Completeness** (all ODRL rules implemented)
-
-## Validation Checklist
-
-### Syntax (MUST PASS)
-- ✓ Has `import rego.v1`
-- ✓ All rules have `if` keyword
-- ✓ Multi-value rules use `contains`
-- ✓ No syntax errors
-
-### Type Correctness (CRITICAL - MUST PASS)
-- ✓ Temporal values use `time.*` functions (not string comparison)
-- ✓ Numeric values use numeric operators (not quoted strings)
-- ✓ Boolean values use boolean comparison (not quoted strings)
-- ✓ Sets use `in` operator with proper set syntax
-- ✓ Hierarchical data uses appropriate functions
-
-### Common Type Errors to Check
-
-❌ **Type Errors to Flag:**
-- `input.age == "18"` → should be `input.age >= 18`
-- `input.dateTime == "2025-12-31"` → should use `time.parse_rfc3339_ns()`
-- `input.flag == "true"` → should be `input.flag == true`
-- `input.role == "admin" || input.role == "user"` → should be `input.role in {{"admin", "user"}}`
-
-### Value Validation (CRITICAL - MUST PASS)
-- ✓ NO hardcoded placeholder values (check for common placeholders):
-  * Role names: "admin", "user", "manager" (only if NOT in ODRL)
-  * Department names: "Engineering", "Sales", "HR" (only if NOT in ODRL)
-  * Email domains: "company.com", "example.com" (only if NOT in ODRL)
-  * Generic strings: "test", "sample", "example" (only if NOT in ODRL)
-- ✓ All values traceable to ODRL policy
-- ✓ Variable names match ODRL field names
-
-### Logic (MUST PASS)
-- ✓ Permissions correctly implement ODRL permissions
-- ✓ Prohibitions correctly implement ODRL prohibitions
-- ✓ All constraints from ODRL are present in Rego
-
-### Enterprise Readiness
-- ✓ Appropriate built-in functions chosen based on data type
-- ✓ Pattern matching where appropriate
-- ✓ No unnecessary complexity
-
-## Validation Process
-
-FOR each rule in generated Rego:
-  CHECK if it contains string literals for non-string values
-  IF yes:
-    TRACE literal back to ODRL policy
-    CHECK the data type of the original value
-    IF types don't match (e.g., number quoted as string):
-      FLAG as type error
-      SEVERITY: CRITICAL
-  CHECK if rule implements an ODRL permission/prohibition
-  IF no corresponding ODRL component:
-    FLAG as invented rule
-    SEVERITY: HIGH
-
-## Available Tools
-
-- **check_rego_syntax**: Validate Rego v1 syntax
+# ============================================================================
+# Mixture of Experts (MoE) Prompts
+# ============================================================================
+
+JURISDICTION_EXPERT_PROMPT = """
+You are a Jurisdiction and Coverage Expert specializing in geographic and legal boundaries.
+
+## Your Expertise
+
+1. **Jurisdiction Identification**: Extract countries, regions, states, and localities
+2. **Hierarchical Analysis**: Understand parent-child relationships (US > US:CA > US:CA:SF)
+3. **Pattern Recognition**: Identify jurisdiction patterns and wildcards
+4. **Regex Generation**: Create patterns for matching jurisdictions
+
+## Analysis Framework
+
+For each rule:
+1. Identify ALL jurisdictions mentioned or implied
+2. Determine hierarchy level
+3. Identify relationships between jurisdictions
+4. Suggest regex patterns for matching
+5. Flag ambiguous or missing jurisdiction data
 
 ## Output Format
 
 ```json
-{{
-  "is_valid": true|false,
-  "syntax_errors": [...],
-  "type_errors": [
-    {{
-      "line": 15,
-      "issue": "Using string comparison for number",
-      "current": "input.age == \\"18\\"",
-      "should_be": "input.age >= 18",
-      "severity": "CRITICAL"
-    }}
-  ],
-  "hardcoded_placeholders": [...],
-  "logic_errors": [...],
-  "missing_constraints": [...],
-  "confidence_score": 0.95,
-  "detailed_feedback": "..."
-}}
+{
+  "jurisdictions": ["list", "of", "jurisdictions"],
+  "hierarchy": {"parent": ["children"]},
+  "regex_patterns": {"jurisdiction": "pattern"},
+  "confidence": 0.95,
+  "reasoning": "step-by-step explanation",
+  "concerns": ["any ambiguities or issues"]
+}
 ```
 """
 
-CORRECTION_REACT_PROMPT = f"""You are an expert Rego debugger specializing in type corrections and removing hardcoded values.
+REGEX_EXPERT_PROMPT = """
+You are a Regex Pattern Matching Expert specializing in Rego-compatible patterns.
 
-## Your Task
+## Your Expertise
 
-Fix ALL issues in generated Rego code:
-1. **Remove hardcoded placeholder values** (CRITICAL)
-2. **Fix type errors** (CRITICAL)
-3. Extract actual values from ODRL policy
-4. Fix syntax errors
-5. Fix logic errors
+1. **Pattern Design**: Create efficient regex patterns for OPA Rego
+2. **Rego Functions**: Use regex.match(), regex.find_all_string_submatch_n()
+3. **Hierarchical Matching**: Handle parent-child relationships
+4. **Partial Matching**: Support flexible matching strategies
 
-## Correction Priority
+## Pattern Generation Rules
 
-1. **CRITICAL**: Fix type errors (numbers/dates as strings)
-2. **CRITICAL**: Remove hardcoded placeholders
-3. **HIGH**: Fix syntax errors
-4. **MEDIUM**: Fix logic errors
-5. **LOW**: Improve code style
-
-## Type Error Correction Process
-
-FOR each type mismatch:
-  IDENTIFY the constraint in ODRL
-  DETERMINE the actual data type
-  USE appropriate type-aware Rego pattern
-  REPLACE string comparison with correct typed comparison
-
-## Common Type Fixes
-
-### Fix 1: String to Numeric
-❌ Before: `input.age == "18"`
-✅ After: `input.age >= 18`
-
-### Fix 2: String to Temporal
-❌ Before: `input.dateTime == "2025-12-31T23:59:59Z"`
-✅ After: `time.now_ns() < time.parse_rfc3339_ns("2025-12-31T23:59:59Z")`
-
-### Fix 3: String to Boolean
-❌ Before: `input.consentGiven == "true"`
-✅ After: `input.consentGiven == true`
-
-### Fix 4: Multiple OR to Set
-❌ Before: `input.role == "admin"; input.role == "user"`
-✅ After: `input.role in {{"admin", "user"}}`
-
-### Fix 5: String to Hierarchical
-❌ Before: `input.category == "personal:contact"`
-✅ After: `startswith(input.category, "personal:contact")`
-
-## Available Tools
-
-- **generate_typed_rego_pattern**: Regenerate patterns with correct types
-- **generate_complete_typed_rule**: Regenerate entire rules with correct types
-- **check_rego_syntax**: Validate fixes
-- **fix_missing_if**: Fix syntax issues
-
-## Hardcoded Value Removal Process
-
-FOR each hardcoded placeholder:
-  FIND the corresponding ODRL constraint
-  EXTRACT actual value from constraint
-  IF no specific value in ODRL:
-    USE generic variable-based pattern
-    DOCUMENT in comment where value should come from
-  REPLACE placeholder with actual value OR variable
+1. Use regex.match() for exact matching
+2. Use regex.find_all_string_submatch_n() for partial/multiple matches
+3. Use startswith() for hierarchy matching
+4. Use contains() for substring matching
+5. Combine patterns with logical operators
 
 ## Output Format
 
 ```json
-{{
-  "corrected_rego": "... complete corrected code ...",
-  "changes_made": [
-    {{
-      "line": 15,
-      "issue": "Type error: number quoted as string",
-      "fix": "Changed \\"18\\" to 18 with >= operator",
-      "odrl_reference": "permission[0].constraint[0].rightOperand"
-    }}
-  ],
-  "confidence": 0.95
-}}
+{
+  "patterns": {
+    "pattern_name": "regex_pattern",
+    "usage": "rego_function_call"
+  },
+  "recommended_approach": "description",
+  "confidence": 0.90,
+  "reasoning": "why these patterns",
+  "alternatives": ["other approaches"]
+}
 ```
 """
 
-LOGIC_ANALYZER_REACT_PROMPT = f"""You are an expert in deontic logic and policy consistency analysis.
+TYPE_SYSTEM_EXPERT_PROMPT = """
+You are a Type System Expert specializing in data type inference and Rego type handling.
 
-## Your Task
+## Your Expertise
 
-Analyze ODRL policies for logical consistency using ONLY the actual values present in the policy.
+1. **Type Inference**: Determine correct data types from values
+2. **Rego Type Mapping**: Map ODRL types to Rego types
+3. **Type Validation**: Ensure type consistency
+4. **Function Selection**: Choose correct Rego functions for types
+
+## Type Inference Rules
+
+- Temporal: ISO 8601 dates → time.parse_rfc3339_ns()
+- Numeric: integers/floats → numeric operators (>, <, ==)
+- Boolean: true/false → boolean operators
+- Arrays: lists → set operations (in, contains)
+- Strings: text → string functions (startswith, contains, regex)
+
+## Output Format
+
+```json
+{
+  "inferred_type": "type_name",
+  "rego_type": "rego_representation",
+  "recommended_function": "time.parse_rfc3339_ns",
+  "confidence": 0.95,
+  "reasoning": "type inference explanation",
+  "edge_cases": ["potential issues"]
+}
+```
+"""
+
+LOGIC_EXPERT_PROMPT = """
+You are a Logic and Consistency Expert specializing in policy logic validation.
+
+## Your Expertise
+
+1. **Logical Analysis**: Detect contradictions and inconsistencies
+2. **Negation Validation**: Ensure prohibitions properly negate permissions
+3. **Completeness**: Identify gaps in policy coverage
+4. **AST Validation**: Validate Abstract Syntax Trees
+
+## Validation Framework
+
+1. Check for contradictions (same action both allowed and denied)
+2. Validate constraint logic (no impossible conditions)
+3. Ensure mutual exclusivity where required
+4. Verify completeness of coverage
+5. Detect ambiguous or overlapping conditions
+
+## Output Format
+
+```json
+{
+  "is_logically_consistent": true,
+  "contradictions": [],
+  "gaps": [],
+  "concerns": [],
+  "confidence": 0.90,
+  "reasoning": "logical analysis",
+  "recommendations": ["improvements"]
+}
+```
+"""
+
+AST_EXPERT_PROMPT = """
+You are an Abstract Syntax Tree (AST) Expert specializing in policy structure analysis.
+
+## Your Expertise
+
+1. **AST Construction**: Build accurate tree representations
+2. **Tree Traversal**: Navigate and validate tree structures
+3. **Node Validation**: Verify correctness of each node
+4. **Logic Validation**: Ensure structural correctness
 
 ## Analysis Process
 
-1. **Extract Actual Rules**:
-   - List all permissions with their ACTUAL actions and constraints
-   - List all prohibitions with their ACTUAL actions and constraints
+1. Construct AST from policy
+2. Traverse tree depth-first
+3. Validate each node
+4. Check parent-child relationships
+5. Verify logical flow
+6. Calculate correctness score
 
-2. **Analyze Logic**:
-   - Check if prohibitions properly negate permissions
-   - Identify contradictions (same action allowed and denied under same conditions)
-   - Find gaps (actions neither allowed nor denied)
+## Output Format
 
-3. **Report Issues**:
-   - Use ACTUAL action names and constraint values from policy
-   - NO hypothetical scenarios or invented values
+```json
+{
+  "ast_valid": true,
+  "correctness_score": 0.95,
+  "validation_issues": [],
+  "traversal_log": ["step 1", "step 2"],
+  "confidence": 0.92,
+  "reasoning": "AST validation explanation"
+}
+```
+"""
+
+# ============================================================================
+# Reflection Agent Prompts
+# ============================================================================
+
+REFLECTION_PROMPT_TEMPLATE = """
+You are a Self-Reflection Agent responsible for critical evaluation of your own work.
+
+## Reflection Process
+
+**Step 1: Review Your Output**
+- What did you produce?
+- What was your reasoning?
+- What assumptions did you make?
+
+**Step 2: Critical Analysis**
+- Is this output correct?
+- Are there any errors or inconsistencies?
+- Did you miss anything important?
+- Are there better approaches?
+
+**Step 3: Confidence Assessment**
+- How confident are you in each part? (0-1 scale)
+- What are your areas of uncertainty?
+- Where might you be wrong?
+
+**Step 4: Improvement Suggestions**
+- What could be improved?
+- What additional information would help?
+- What alternative approaches exist?
+
+**Step 5: Final Judgment**
+- Should this output be accepted?
+- What corrections are needed?
+- What follow-up is required?
+
+## Output Format
+
+```json
+{
+  "self_assessment": {
+    "correctness": 0.90,
+    "completeness": 0.85,
+    "clarity": 0.95
+  },
+  "identified_issues": [],
+  "uncertainties": [],
+  "suggested_improvements": [],
+  "should_revise": false,
+  "reflection_reasoning": "detailed self-critique"
+}
+```
+
+CRITICAL: Be honest and critical. It's better to identify problems than to miss them.
+"""
+
+# ============================================================================
+# Coverage-Based ReAct Agent Prompts
+# ============================================================================
+
+ODRL_PARSER_REACT_PROMPT = f"""You are an expert ODRL policy analyst with advanced reasoning capabilities.
+
+## Primary Mission
+
+Parse ODRL policies with a COVERAGE-FIRST approach:
+1. Identify all jurisdictions/regions where rules apply
+2. Group rules by coverage + action combinations
+3. Extract custom:originalData identifiers for rule tracking
+4. Perform type inference on all constraints
+5. Build hierarchical understanding of jurisdictions
+
+{ODRL_STRUCTURE_CONTEXT}
+
+## Available Tools
+
+**Coverage Tools**:
+- extract_coverage_and_jurisdictions: PRIMARY TOOL - Extract and group by coverage
+- extract_custom_original_data: Track rules via custom:originalData IDs
+- generate_regex_patterns_for_jurisdictions: Create jurisdiction matching patterns
+
+**Analysis Tools**:
+- extract_policy_metadata: Get policy overview
+- extract_and_infer_constraints_with_coverage: Extract constraints with coverage info
+- analyze_rdfs_comments: Get semantic hints
+- generate_ast_from_policy: Generate AST for validation
+
+{COT_REASONING_TEMPLATE}
+
+## Workflow
+
+1. **Extract Coverage First**: Call extract_coverage_and_jurisdictions
+2. **Map Original Data**: Call extract_custom_original_data
+3. **Generate Patterns**: Call generate_regex_patterns_for_jurisdictions
+4. **Analyze Constraints**: Call extract_and_infer_constraints_with_coverage
+5. **Build AST**: Call generate_ast_from_policy
+6. **Document Reasoning**: Explain your chain of thought
+
+## CRITICAL Requirements
+
+- NO hardcoded values - extract everything from policy
+- Coverage/jurisdiction is the PRIMARY organizing principle
+- Each rule must be traceable via custom:originalData
+- Use regex patterns for flexible jurisdiction matching
+- Think step-by-step and document reasoning
+
+## Example Reasoning
+
+"Step 1: Extracted 3 permissions and 2 prohibitions
+Step 2: Identified jurisdictions: US, US:CA, EU:DE
+Step 3: Grouped rules: US+read (2 rules), EU:DE+process (1 rule)
+Step 4: Generated regex patterns for hierarchical matching
+Step 5: Mapped custom:originalData: rule_001 → permission_0
+Step 6: Validated coverage completeness: ✓"
+"""
+
+MIXTURE_OF_EXPERTS_REACT_PROMPT = f"""You are a Mixture of Experts Orchestrator coordinating specialized expert agents.
+
+## Your Role
+
+You coordinate multiple expert agents, each with specialized knowledge:
+1. **Jurisdiction Expert**: Coverage and geographic analysis
+2. **Regex Expert**: Pattern matching and regex generation
+3. **Type System Expert**: Data type inference
+4. **Logic Expert**: Consistency and validation
+5. **AST Expert**: Structural analysis
+
+## Workflow
+
+**Phase 1: Expert Consultation**
+- Query each expert for their specialized analysis
+- Collect expert opinions and recommendations
+- Identify areas of agreement and disagreement
+
+**Phase 2: Consensus Building**
+- Compare expert analyses
+- Resolve disagreements through logical reasoning
+- Synthesize unified understanding
+
+**Phase 3: Validation**
+- Cross-validate findings across experts
+- Identify remaining uncertainties
+- Request additional expert input if needed
+
+**Phase 4: Final Decision**
+- Make informed decision based on expert consensus
+- Document reasoning and confidence levels
+- Highlight any remaining concerns
+
+{COT_REASONING_TEMPLATE}
+
+## Expert Analysis Template
+
+For each expert:
+```
+Expert: [Name]
+Analysis: [Expert's findings]
+Confidence: [0-1]
+Reasoning: [Expert's reasoning]
+Concerns: [Any issues raised]
+```
+
+## Consensus Template
+
+```
+Agreement: [What experts agree on]
+Disagreement: [Where experts differ]
+Resolution: [How disagreement resolved]
+Final Decision: [Consensus decision]
+Confidence: [Overall confidence 0-1]
+```
+
+## CRITICAL
+
+- Consult ALL relevant experts
+- Document ALL expert opinions
+- Resolve disagreements explicitly
+- Explain your consensus-building process
+"""
+
+REGO_GENERATOR_REACT_PROMPT = f"""You are an expert OPA Rego v1 code generator with advanced reasoning capabilities.
+
+{ODRL_STRUCTURE_CONTEXT}
+
+## Primary Mission
+
+Generate coverage-based Rego rules:
+1. Use coverage (jurisdiction) + action as primary rule organization
+2. Generate regex patterns for jurisdiction matching
+3. Create hierarchical jurisdiction checks
+4. Ensure all values from policy (NO hardcoding)
+5. Use proper type handling for all constraints
+
+## Available Tools
+
+- extract_and_infer_constraints_with_coverage: Get typed constraints with coverage
+- generate_coverage_based_rego_rule: PRIMARY TOOL - Generate coverage-based rules
+- traverse_ast_by_coverage: Filter rules by jurisdiction
+- check_rego_syntax: Validate generated code
+- generate_regex_patterns_for_jurisdictions: Get jurisdiction patterns
+
+## OPA Rego v1 Requirements
+
+```rego
+package example
+
+import rego.v1
+
+# Coverage-based rule structure
+allow_ACTION_JURISDICTION if {{
+    # Jurisdiction check using regex or hierarchy
+    regex.match("^US:.*", input.jurisdiction)
+    
+    # OR hierarchical check
+    startswith(input.jurisdiction, "US:")
+    
+    # Constraint conditions
+    input.age >= 18
+    input.purpose in {{"research", "education"}}
+}}
+```
+
+## Jurisdiction Matching Patterns
+
+1. **Exact Match**: `input.jurisdiction == "US"`
+2. **Hierarchical**: `startswith(input.jurisdiction, "US:")`
+3. **Regex Pattern**: `regex.match("^US:.*", input.jurisdiction)`
+4. **Multiple**: `input.jurisdiction in {{"US", "CA", "UK"}}`
+5. **Wildcard**: `regex.find_all_string_submatch_n("^EU:.*", input.jurisdiction, -1)`
+
+{COT_REASONING_TEMPLATE}
+
+## Generation Process
+
+**Stage 1: Group by Coverage + Action**
+```
+Identify all unique (coverage, action) pairs
+Example: (US, read), (US:CA, write), (EU, process)
+```
+
+**Stage 2: Generate Jurisdiction Checks**
+```
+For each coverage, determine matching strategy:
+- Exact: single jurisdiction
+- Hierarchical: parent includes children
+- Pattern: regex matching
+```
+
+**Stage 3: Add Typed Constraints**
+```
+For each constraint:
+- Infer correct type
+- Use appropriate Rego function
+- Handle edge cases
+```
+
+**Stage 4: Combine into Rule**
+```
+Rule name: allow_ACTION_COVERAGE
+Body: jurisdiction check + constraints
+```
+
+## Example Reasoning
+
+"Step 1: Identified coverage groups: US (2 rules), EU:DE (1 rule)
+Step 2: For US, using hierarchical check: startswith(input.jurisdiction, 'US')
+Step 3: This allows US, US:CA, US:NY, etc.
+Step 4: Adding constraints: age >= 18 (numeric), purpose in set
+Step 5: Combined into allow_read_US rule"
+
+## CRITICAL
+
+- NO hardcoded values - all from policy
+- Coverage is PRIMARY rule identifier
+- Use regex.find_all_string_submatch_n for flexible matching
+- Document reasoning at each step
+- Validate logic via AST
+"""
+
+REFLECTION_REACT_PROMPT = f"""You are a Self-Reflection Agent for Rego code validation.
+
+## Your Mission
+
+Critically evaluate generated Rego code for:
+1. **Coverage Correctness**: Do jurisdiction checks work correctly?
+2. **Regex Accuracy**: Are regex patterns correct?
+3. **Type Correctness**: Are types handled properly?
+4. **Logic Validity**: Is the logic sound?
+5. **Syntax Correctness**: Is Rego v1 syntax correct?
+
+## Available Tools
+
+- validate_ast_logic: Validate via AST
+- check_rego_syntax: Check syntax
+- traverse_ast_by_coverage: Test coverage filtering
+
+{REFLECTION_PROMPT_TEMPLATE}
+
+## Validation Checklist
+
+**Coverage Validation**:
+- [ ] Jurisdiction checks use correct regex patterns
+- [ ] Hierarchical jurisdictions handled properly
+- [ ] Wildcards and patterns work as intended
+- [ ] Edge cases covered
+
+**Type Validation**:
+- [ ] Temporal values use time.parse_rfc3339_ns()
+- [ ] Numeric values not quoted as strings
+- [ ] Boolean values use true/false (not "true"/"false")
+- [ ] Arrays use correct set syntax
+
+**Logic Validation**:
+- [ ] No contradictions (action both allowed and denied)
+- [ ] Constraints are satisfiable
+- [ ] Negations are correct
+- [ ] AST validation passes
+
+**Syntax Validation**:
+- [ ] import rego.v1 present
+- [ ] All rules use 'if' keyword
+- [ ] Multi-value rules use 'contains'
+- [ ] No syntax errors
+
+## Reflection Process
+
+1. Read generated Rego code carefully
+2. Check against validation checklist
+3. Test with example inputs mentally
+4. Identify any issues or concerns
+5. Assess overall correctness (0-1 score)
+6. Provide specific feedback
 
 ## Output Format
 
 ```json
 {{
-  "permissions": [
+  "validation_passed": true,
+  "correctness_score": 0.92,
+  "issues": [
     {{
-      "action": "<actual_action_from_policy>",
-      "constraints": "<actual_constraints>"
+      "severity": "warning",
+      "component": "rule_name",
+      "issue": "description",
+      "suggestion": "how to fix"
     }}
   ],
-  "prohibitions": [...],
-  "consistency_issues": [
-    {{
-      "severity": "critical|warning",
-      "message": "Contradiction: Action '<actual_action>' both allowed and denied under <actual_conditions>"
-    }}
-  ]
+  "confidence_assessment": {{
+    "coverage_logic": 0.95,
+    "type_handling": 0.90,
+    "syntax": 0.98
+  }},
+  "should_correct": false,
+  "reflection": "detailed self-assessment"
 }}
 ```
 """
 
-# Tool descriptions
+CORRECTION_REACT_PROMPT = f"""You are a Correction Agent for fixing Rego code issues.
+
+## Your Mission
+
+Fix issues identified by reflection agent:
+1. Correct coverage/jurisdiction logic
+2. Fix regex patterns
+3. Correct type handling
+4. Resolve logical inconsistencies
+5. Fix syntax errors
+
+## Available Tools
+
+- generate_coverage_based_rego_rule: Regenerate rules
+- generate_regex_patterns_for_jurisdictions: Fix patterns
+- validate_ast_logic: Validate fixes
+- check_rego_syntax: Check syntax
+
+{COT_REASONING_TEMPLATE}
+
+## Correction Process
+
+**Step 1: Analyze Issues**
+- What is wrong?
+- Why is it wrong?
+- What is the correct approach?
+
+**Step 2: Determine Fix Strategy**
+- Can I patch it?
+- Should I regenerate?
+- What's the minimal fix?
+
+**Step 3: Apply Corrections**
+- Make targeted fixes
+- Preserve correct parts
+- Maintain consistency
+
+**Step 4: Validate Fixes**
+- Test via AST validation
+- Check syntax
+- Verify logic
+
+**Step 5: Document Changes**
+- What changed?
+- Why?
+- How does it fix the issue?
+
+## Example Reasoning
+
+"Issue: Regex pattern '^US' matches 'USA' incorrectly
+Analysis: Missing word boundary or end anchor
+Fix: Change to '^US$' for exact match or '^US:' for hierarchy
+Validation: Tested mentally - now matches correctly
+Result: ✓ Fixed"
+
+## CRITICAL
+
+- Make MINIMAL changes to fix issues
+- Preserve working code
+- Validate each fix
+- Document reasoning
+"""
+
+AST_VALIDATION_REACT_PROMPT = f"""You are an AST Validation Agent specializing in logical correctness.
+
+## Your Mission
+
+Validate policy logic via Abstract Syntax Tree analysis:
+1. Build AST from ODRL policy
+2. Traverse AST systematically
+3. Validate each node
+4. Check structural correctness
+5. Calculate logic correctness score
+
+## Available Tools
+
+- generate_ast_from_policy: Build AST
+- validate_ast_logic: Validate AST
+- traverse_ast_by_coverage: Coverage-based traversal
+
+{AST_EXPERT_PROMPT}
+
+{COT_REASONING_TEMPLATE}
+
+## Validation Process
+
+**Phase 1: AST Construction**
+```
+Build tree with nodes for:
+- Policy (root)
+- Permissions (branches)
+- Prohibitions (branches)
+- Constraints (leaves)
+```
+
+**Phase 2: Traversal**
+```
+Depth-first traversal:
+1. Visit policy root
+2. Traverse each permission/prohibition
+3. Validate each constraint
+4. Check parent-child relationships
+```
+
+**Phase 3: Validation**
+```
+For each node:
+- Verify completeness
+- Check consistency
+- Validate logic
+- Record issues
+```
+
+**Phase 4: Scoring**
+```
+Calculate correctness score:
+- Base score: 1.0
+- Deduct for critical issues: -1.0 per issue
+- Deduct for warnings: -0.5 per issue
+- Deduct for info: -0.1 per issue
+- Final score: max(0.0, base - deductions)
+```
+
+## Output Format
+
+```json
+{{
+  "ast_valid": true,
+  "correctness_score": 0.94,
+  "nodes_validated": 42,
+  "issues": [],
+  "traversal_log": [
+    "Visited root: policy_id",
+    "Visited permission_0: read action",
+    "Validated constraint_0: age >= 18"
+  ],
+  "reasoning": "AST validation explanation"
+}}
+```
+
+## CRITICAL
+
+- Traverse ALL nodes
+- Validate EVERY constraint
+- Check for contradictions
+- Document traversal steps
+- Provide detailed issues
+"""
+
+# ============================================================================
+# Expert Consensus Prompt
+# ============================================================================
+
+EXPERT_CONSENSUS_PROMPT = """
+## Building Expert Consensus
+
+When multiple experts provide analyses:
+
+**Step 1: Collect All Opinions**
+- Document each expert's analysis
+- Note confidence levels
+- Identify key findings
+
+**Step 2: Find Agreement**
+- What do ALL experts agree on?
+- High confidence consensus = likely correct
+
+**Step 3: Analyze Disagreement**
+- Where do experts differ?
+- Why do they differ?
+- Which expert is more credible for this specific aspect?
+
+**Step 4: Resolve Conflicts**
+- Use logical reasoning
+- Consider domain expertise
+- Weigh confidence levels
+- Make informed decision
+
+**Step 5: Synthesize**
+- Combine agreed findings
+- Resolve disagreements
+- Create unified analysis
+- Document reasoning
+
+**Step 6: Confidence Assessment**
+- High agreement + high confidence = very reliable
+- Disagreement + low confidence = uncertain
+- Mixed signals = needs investigation
+"""
+
+# ============================================================================
+# Tool Descriptions
+# ============================================================================
+
 TOOL_DESCRIPTIONS = {
+    # Coverage tools
+    "extract_coverage_and_jurisdictions": "Extract jurisdictions and group rules by coverage+action",
+    "extract_custom_original_data": "Extract custom:originalData IDs for rule tracking",
+    "generate_regex_patterns_for_jurisdictions": "Generate regex patterns for jurisdiction matching",
+    
+    # AST tools
+    "generate_ast_from_policy": "Generate Abstract Syntax Tree for validation",
+    "validate_ast_logic": "Validate logic via AST traversal",
+    "traverse_ast_by_coverage": "Traverse AST filtering by jurisdiction",
+    
+    # Enhanced constraint tools
+    "extract_and_infer_constraints_with_coverage": "Extract constraints with types and coverage",
+    "generate_coverage_based_rego_rule": "Generate complete coverage-based Rego rule",
+    
+    # Original tools
     "extract_policy_metadata": "Extract policy ID, type, and structure",
-    "extract_permissions": "Get all permission rules with details",
-    "extract_prohibitions": "Get all prohibition rules with details",
-    "extract_constraints": "Parse constraint structures",
-    "extract_and_infer_constraints": "Extract constraints WITH intelligent type inference",
-    "infer_constraint_type": "Analyze a constraint and infer its data type",
-    "generate_typed_rego_pattern": "Generate Rego pattern with correct type handling",
-    "generate_complete_typed_rule": "Generate complete rule with all typed constraints",
-    "generate_type_inference_report": "Generate report of all inferred types",
     "analyze_rdfs_comments": "Extract semantic hints for type inference",
-    "analyze_operator": "Understand operator semantics",
-    "analyze_rightOperand": "Infer type from value",
-    "suggest_rego_pattern": "Generate Rego pattern (basic)",
     "check_rego_syntax": "Validate Rego v1 syntax",
     "fix_missing_if": "Add missing 'if' keywords"
 }
