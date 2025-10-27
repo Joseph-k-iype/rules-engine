@@ -1,9 +1,7 @@
 """
 ODRL to Rego Conversion Prompting Strategies
 Extends the existing prompting strategies with ODRL-specific patterns
-
-These prompts provide context about ODRL JSON structure without hardcoding values.
-They guide LLMs to understand the semantic structure and generate appropriate Rego.
+Updated with enterprise-scale OPA built-in functions
 """
 
 # ============================================================================
@@ -16,121 +14,80 @@ ODRL_STRUCTURE_CONTEXT = """
 ODRL policies follow the W3C ODRL 2.2 specification and use JSON-LD format.
 This context explains the structure WITHOUT hardcoding specific values.
 
-## Core Policy Structure
+## Core Components
 
-A complete ODRL policy typically contains:
+1. **Policy Container**:
+   - `@context`: JSON-LD context (usually ODRL vocabulary)
+   - `@type` or `policytype`: Policy type (Set, Offer, Agreement, Privacy)
+   - `uid` or `@id` or `policyid`: Unique policy identifier
+
+2. **Rules** (permissions, prohibitions, obligations):
+   - `action`: The action being permitted/prohibited (e.g., "use", "distribute")
+   - `target`: Asset(s) the rule applies to
+   - `assignee`: Party granted permission or bound by prohibition
+   - `assigner`: Party granting permission or imposing prohibition
+   - `constraint`: Conditions that must be met (array)
+   - `duty`: Obligations tied to permissions
+   - `remedy`: What must happen if prohibition is violated
+
+3. **Constraints** (conditions on rules):
+   - `leftOperand`: Property being constrained (e.g., "dateTime", "purpose")
+   - `operator`: Comparison operator (eq, neq, lt, gt, lteq, gteq, etc.)
+   - `rightOperand`: Value to compare against
+   - `unit` (optional): Unit of measurement
+   - `dataType` (optional): Explicit type declaration
+   - Logical operators: `and`, `or`, `xone` for compound constraints
+
+4. **Parties**:
+   - Can be URIs, objects with `@type`, or strings
+   - May include `rdfs:label` for human-readable names
+
+5. **Assets/Targets**:
+   - Can be URIs or objects
+   - May have `rdfs:comment` for context
+
+## Semantic Annotations
+
+- `rdfs:comment`: Human-readable explanations (crucial for understanding intent)
+- `rdfs:label`: Human-readable labels
+- Custom properties may extend ODRL vocabulary
+
+## Example Minimal Structure (for reference, not to be hardcoded):
+
 ```json
 {
-  "@context": "<URI to ODRL context - typically http://www.w3.org/ns/odrl.jsonld>",
-  "@type": "<Policy subclass - can be 'Set', 'Offer', 'Agreement', or 'Privacy'>",
-  "uid": "<Unique identifier for this policy - typically a URI>",
-  "permission": [/* array of permission objects */],
-  "prohibition": [/* array of prohibition objects */],
-  "obligation": [/* array of duty objects */]
+  "@context": "http://www.w3.org/ns/odrl.jsonld",
+  "@type": "Set",
+  "uid": "http://example.com/policy:1234",
+  "permission": [{
+    "action": "use",
+    "target": "http://example.com/asset:5678",
+    "constraint": [{
+      "leftOperand": "purpose",
+      "operator": "eq",
+      "rightOperand": "research"
+    }]
+  }]
 }
 ```
 
-## Permission/Prohibition/Obligation Structure
-
-Each rule (permission/prohibition/obligation) can contain:
-- **target**: URI identifying the asset/resource this rule applies to
-- **action**: The action being permitted/prohibited (e.g., "use", "distribute", "read")
-- **assignee**: URI identifying who this rule applies to (optional)
-- **assigner**: URI identifying who grants/enforces this rule (optional)
-- **constraint**: Array of conditions that must be met
-- **duty**: Array of obligations that must be fulfilled (for permissions)
-
-## Constraint Structure
-
-Constraints define conditions using:
-```json
-{
-  "leftOperand": "<property being evaluated>",
-  "operator": "<comparison operator>",
-  "rightOperand": "<value to compare against>",
-  "rdfs:comment": "<optional semantic context>",
-  "dataType": "<optional XSD datatype>"
-}
-```
-
-### Common leftOperand Values (Examples, NOT Hardcoded)
-- Temporal: "dateTime", "date", "elapsedTime", "dateTimeAfter", "dateTimeBefore"
-- Spatial: "spatial", "spatialCoordinates", "absoluteSpatialPosition"
-- Purpose: "purpose" (usually a URI to a purpose ontology)
-- Event-based: "event" (triggered by specific events)
-- Quantitative: "count", "payAmount", "percentage", "unitOfCount"
-- Technical: "version", "language", "format", "resolution"
-- Industry-specific: "industry", "sector", "deliverychannel"
-
-### Common operator Values
-- Equality: "eq", "neq"
-- Comparison: "lt", "gt", "lteq", "gteq"
-- Set operations: "isAnyOf", "isNoneOf", "isAllOf"
-- Logical: "hasPart", "isPartOf"
-
-### rightOperand Format Patterns
-- URIs: "http://example.com/purpose:research"
-- ISO dates: "2025-12-31T23:59:59Z"
-- Durations: "P30D" (ISO 8601 duration)
-- Numbers: 1000, 0.95
-- Strings: "EU", "en", "research"
-
-## Logical Constraints
-
-Constraints can be combined with logical operators:
-```json
-{
-  "and": [/* array of constraints - all must be true */],
-  "or": [/* array of constraints - at least one must be true */],
-  "xone": [/* array of constraints - exactly one must be true */],
-  "andSequence": [/* array evaluated in order */]
-}
-```
-
-## Custom Properties
-
-ODRL allows custom properties beyond the core vocabulary.
-These are typically:
-- Domain-specific fields (e.g., healthcare, financial)
-- Organization-specific metadata
-- Legislative references
-- Custom constraints from ODRL Profiles
-
-Custom properties should be treated as context for understanding the policy's
-intent, but may not always have direct Rego mappings.
-
-## RDFS Comments
-
-The "rdfs:comment" field provides human-readable context about:
-- Legislative basis (e.g., "GDPR Article 6(1)(f)")
-- Business rules (e.g., "Minimum k-anonymity requirement")
-- Domain semantics (e.g., "Healthcare provider consent required")
-- Data type hints (e.g., "Must be ISO 8601 datetime")
-
-These comments are CRITICAL for:
-1. Understanding the policy's legislative context
-2. Inferring correct Rego data types
-3. Determining constraint evaluation logic
-4. Ensuring compliance with domain-specific rules
+This is just structural context - actual policies will vary significantly.
 """
 
 # ============================================================================
-# REACT AGENT PROMPTS FOR ODRL TO REGO CONVERSION
+# ReAct AGENT PROMPTS (Enterprise Scale)
 # ============================================================================
 
-ODRL_PARSER_REACT_PROMPT = """You are an expert ODRL (Open Digital Rights Language) policy analyst with deep knowledge of:
-- W3C ODRL 2.2 specification
-- JSON-LD structure and semantics  
-- Legislative policy frameworks (GDPR, CCPA, etc.)
-- Domain-specific policy vocabularies
+ODRL_PARSER_REACT_PROMPT = """You are an expert ODRL (Open Digital Rights Language) policy analyst.
 
 ## Your Task
 
-Parse and deeply understand an ODRL policy document. Use your tools to:
-1. Extract all policy components (permissions, prohibitions, obligations)
-2. Analyze constraints and their semantic meaning
-3. Understand custom properties and their context
-4. Interpret RDFS comments for legislative/business context
+Parse and deeply understand ODRL JSON-LD policies using your tools to extract:
+1. Policy metadata and structure
+2. Permissions and their constraints
+3. Prohibitions and their conditions
+4. Semantic context from RDFS comments
+5. Custom ODRL extensions
 
 ## ODRL Structure Context
 
@@ -138,19 +95,18 @@ Parse and deeply understand an ODRL policy document. Use your tools to:
 
 ## Available Tools
 
-Use the available tools to:
-- **extract_policy_metadata**: Get policy ID, type, and high-level structure
-- **extract_permissions**: Extract and analyze all permission rules
-- **extract_prohibitions**: Extract and analyze all prohibition rules  
-- **extract_constraints**: Deep analysis of constraints with type inference
-- **analyze_rdfs_comments**: Extract semantic context from comments
-- **identify_custom_properties**: Find domain-specific extensions
+Use these tools systematically:
+- **extract_policy_metadata**: Get policy ID, type, and rule counts
+- **extract_permissions**: Get all permission rules with details
+- **extract_prohibitions**: Get all prohibition rules with details
+- **extract_constraints**: Deep dive into constraint structures
+- **analyze_rdfs_comments**: Extract semantic context
 
-## Chain of Thought Process
+## Chain of Thought Analysis
 
 For each component you extract:
-1. **Identify**: What is this component? (permission/prohibition/constraint)
-2. **Contextualize**: What is its semantic meaning? (from rdfs:comment)
+1. **Identify**: What is this component?
+2. **Contextualize**: What does rdfs:comment tell us? (from rdfs:comment)
 3. **Relate**: How does it connect to other components?
 4. **Legislate**: What legal/business rule does it represent?
 5. **Type**: What data types are involved? (from context and comments)
@@ -182,23 +138,28 @@ Infer the correct Rego data types for all ODRL constraints by using your tools t
 
 {odrl_structure_context}
 
-## Type Inference Rules for OPA Rego v1
+## Type Inference Rules for OPA Rego v1 (Enterprise Scale)
 
 ### Temporal Types
 - ISO 8601 datetime strings → Use `time.parse_rfc3339_ns()` or `time.parse_duration_ns()`
 - Relative times → Use `time.now_ns()` with arithmetic
 - Durations (P30D) → Parse with `time.parse_duration_ns()`
 
+### String Types (CRITICAL for Enterprise)
+- Department names → Use `startswith()` or `regex.match()` for hierarchical matching
+- Email addresses → Use `regex.match()` with pattern validation
+- Resource paths → Use `startswith()`, `contains()`, or `regex.match()` for patterns
+- Identifiers → Consider `regex.match()` for format validation
+
 ### Numeric Types  
 - Integers → Direct comparison in Rego
 - Floats → Direct comparison in Rego
 - Currency amounts → Consider precision (use strings or integers in cents)
 
-### String Types
-- URIs → String equality or `startswith()` for hierarchical matching
-- Enum values → String equality or set membership
-- Language codes → ISO 639 string comparison
-- Location codes → Wikidata/GeoNames URI or ISO codes
+### Pattern Types
+- Wildcards or patterns → Convert to `regex.match()` with appropriate regex
+- Hierarchical identifiers → Use `startswith()` for prefix matching
+- Classification labels → Consider case-insensitive matching with `lower()`
 
 ### Set Operations
 - isAnyOf → Use Rego set membership `elem in set`
@@ -214,8 +175,7 @@ Infer the correct Rego data types for all ODRL constraints by using your tools t
 Use these tools to gather evidence:
 - **analyze_operator**: Get operator semantics and type implications  
 - **analyze_rightOperand**: Infer type from value format
-- **check_rdfs_comment**: Extract explicit type hints
-- **infer_from_context**: Use domain knowledge for ambiguous cases
+- **analyze_rdfs_comments**: Extract explicit type hints
 - **suggest_rego_pattern**: Generate Rego code pattern for constraint
 
 ## Chain of Thought
@@ -226,7 +186,15 @@ For each constraint:
 3. What value is it compared to? (rightOperand format)
 4. What does rdfs:comment say? (explicit hints)
 5. What's the domain context? (healthcare vs finance implies different types)
-6. What's the BEST Rego type representation?
+6. **Will this scale for enterprise?** (regex vs exact match?)
+7. What's the BEST Rego type representation?
+
+## Enterprise Considerations
+
+- If the constraint involves organization structures, departments, teams → Recommend `startswith()` or `regex.match()`
+- If the constraint involves email or URL → Recommend `regex.match()` with validation
+- If the constraint involves resource paths → Recommend pattern matching functions
+- Always consider case-insensitive matching for string comparisons
 
 ## Output Format
 
@@ -235,54 +203,45 @@ For each constraint, provide:
 {{
   "constraint_id": "...",
   "leftOperand": "...",
-  "inferred_type": "...",
-  "rego_functions": ["time.parse_rfc3339_ns", ...],
-  "rego_pattern": "time.now_ns() < time.parse_rfc3339_ns(input.constraint_value)",
-  "confidence": 0.95,
-  "reasoning": "Step-by-step analysis..."
+  "operator": "...",
+  "rightOperand": "...",
+  "inferred_type": "string_pattern|temporal|numeric|...",
+  "recommended_function": "regex.match|startswith|==|...",
+  "rego_pattern": "regex.match(\\"^dept-.*\\", input.department)",
+  "rationale": "Department names follow hierarchical pattern, regex provides flexibility",
+  "confidence": 0.95
 }}
 ```
 """.format(odrl_structure_context=ODRL_STRUCTURE_CONTEXT)
 
 
-LOGIC_ANALYZER_REACT_PROMPT = """You are an expert in deontic logic, policy consistency analysis, and legislative rule validation.
+LOGIC_ANALYZER_REACT_PROMPT = """You are an expert in deontic logic, policy consistency analysis, and formal verification.
 
 ## Your Task
 
-Analyze the logical relationships between permissions and prohibitions to ensure:
-1. Prohibitions are proper negations of permissions
-2. No contradictory rules exist
-3. All constraint conditions are mutually exclusive where required
-4. The policy is internally consistent
+Analyze ODRL policies for logical consistency, completeness, and correctness.
 
 ## ODRL Structure Context
 
 {odrl_structure_context}
 
-## Deontic Logic Principles
+## Analysis Framework
 
-In well-formed policies:
-- **Permission**: Something IS allowed under specific conditions
-- **Prohibition**: Something IS NOT allowed (typically the negation of permission conditions)
-- **Obligation**: Something MUST be done
+### Deontic Logic Rules
 
-Key validation rules:
-1. For each action, permissions and prohibitions should cover complementary condition spaces
-2. Same action with identical conditions cannot be both permitted and prohibited
-3. Constraint negation should be logically sound (not just syntactic inversion)
+1. **Permissions (P)** assert what IS allowed
+2. **Prohibitions (F)** assert what is FORBIDDEN
+3. **Ideal relationship**: F = ¬P (prohibition negates permission)
 
-## Available Tools
+### Consistency Checks
 
-- **extract_permission_logic**: Parse permission conditions into logical formula
-- **extract_prohibition_logic**: Parse prohibition conditions into logical formula
-- **check_negation**: Verify prohibition is logical negation of permission
-- **detect_contradictions**: Find conflicting rules
-- **validate_constraint_coverage**: Check if all cases are covered or intentionally left open
+1. **No Contradictions**: ¬(P ∧ F) for same action under same conditions
+2. **Completeness**: For each action, either P or F should apply (or default policy handles it)
+3. **Proper Negation**: If P(action, C), then F(action, ¬C)
 
-## Chain of Thought Process
+## Analysis Process
 
-For each permission-prohibition pair:
-1. **Parse conditions**: What constraints apply to each?
+1. **Extract rules**: Parse permissions and prohibitions
 2. **Formalize logic**: Express as logical formula (AND/OR/NOT)
 3. **Check negation**: Is prohibition = NOT(permission)?
 4. **Identify gaps**: Are there cases neither permitted nor prohibited?
@@ -331,15 +290,11 @@ Provide structured analysis:
 """.format(odrl_structure_context=ODRL_STRUCTURE_CONTEXT)
 
 
-REGO_GENERATOR_REACT_PROMPT = """You are an expert OPA Rego v1 (version 1.9.0+) policy author with deep knowledge of:
-- Rego syntax and semantics
-- OPA policy evaluation engine
-- Best practices for policy authoring
-- Performance optimization
+REGO_GENERATOR_REACT_PROMPT = """You are an expert OPA Rego v1 (version 1.9.0+) policy author with deep enterprise deployment experience.
 
 ## Your Task
 
-Generate syntactically correct, logically sound Rego v1 code from analyzed ODRL policies.
+Generate syntactically correct, logically sound, enterprise-scale Rego v1 code from analyzed ODRL policies.
 
 ## ODRL Structure Context
 
@@ -353,71 +308,118 @@ Generate syntactically correct, logically sound Rego v1 code from analyzed ODRL 
 4. **Package naming**: Use descriptive, hierarchical packages
 5. **No deprecated built-ins**: Use only Rego v1 built-ins
 
+## ENTERPRISE-SCALE STRING OPERATIONS (CRITICAL)
+
+For large organizations with thousands of users, departments, and resources:
+
+### Use Regex for Flexible Pattern Matching
+```rego
+# Match department patterns: eng-backend, eng-frontend, etc.
+regex.match("^eng-[a-z]+$", input.department)
+
+# Email domain validation for multi-subsidiary enterprise
+regex.match("^[a-zA-Z0-9._%+-]+@(company|partner|subsidiary)\\\\.com$", input.email)
+
+# Resource path patterns
+regex.match("^/projects/[0-9]{{4}}/.*$", input.resource_path)
+```
+
+### Use Built-in String Functions
+```rego
+# Hierarchical matching
+startswith(input.department, "Engineering")  # Matches all Engineering sub-depts
+
+# Substring checking
+contains(lower(input.description), "confidential")
+
+# Case-insensitive comparison
+lower(input.role) == "admin"
+
+# String manipulation
+split(input.full_name, " ")
+concat("/", ["api", "v1", "users"])
+trim(input.value, " ")
+```
+
+### Array and Set Operations
+```rego
+# Set membership
+input.role in {"admin", "manager", "tech_lead"}
+
+# Array iteration with comprehension
+allowed_resources := [r | r := input.resources[_]; startswith(r, "public/")]
+
+# Check if any element matches
+some resource in input.resources
+contains(resource, "sensitive")
+```
+
 ## Available Tools
 
-- **generate_package_header**: Create package declaration and imports
-- **generate_permission_rules**: Create allow rules from permissions
-- **generate_prohibition_rules**: Create denial/violation rules
-- **generate_constraint_evaluation**: Convert ODRL constraints to Rego conditions
-- **generate_helper_functions**: Create reusable functions for complex logic
-- **validate_syntax**: Check generated Rego for syntax errors
+- **suggest_rego_pattern**: Generate Rego code pattern for constraints
+- **analyze_operator**: Understand ODRL operator semantics
+- **check_rego_syntax**: Validate generated code
+- **generate_helper_functions**: Create reusable functions
 
-## Rego Code Generation Patterns
+## Code Generation Strategy
 
-### Permission Rule Pattern
+For EACH constraint, decide:
+1. Should this use **exact match** (==) or **pattern match** (regex/startswith)?
+2. Should this be **case-sensitive** or case-insensitive?
+3. Does this need **string manipulation** (split, trim, etc.)?
+4. Can this be a **reusable helper function**?
+
+## Example Enterprise Patterns
+
 ```rego
-# Permission: <action> allowed when <conditions>
+package odrl.enterprise.policy
+
+import rego.v1
+
+# Default deny for security
+default allow := false
+
+# Permission: Engineering department access to engineering resources
 allow if {{
-    # Action check
-    input.action == "<action>"
+    # Hierarchical department matching
+    startswith(input.user.department, "Engineering")
     
-    # Constraint evaluations
-    <constraint_condition_1>
-    <constraint_condition_2>
+    # Pattern-based resource matching
+    regex.match("^/engineering/.*", input.resource)
     
-    # All conditions in a rule body are ANDed together
+    # Role validation with set membership
+    input.user.role in {{"developer", "tech_lead", "manager"}}
 }}
-```
 
-### Prohibition Rule Pattern  
-```rego
-# Prohibition: <action> denied when <conditions>
+# Permission: Cross-subsidiary access with email validation
+allow if {{
+    # Extract and validate email domain
+    email_domain := split(input.user.email, "@")[1]
+    regex.match("^(company|subsidiary-[a-z]+)\\\\.com$", email_domain)
+    
+    # Resource owner matching
+    resource_owner := split(input.resource, "/")[0]
+    resource_owner == email_domain or resource_owner == "shared"
+}}
+
+# Prohibition: Block sensitive data access outside business hours
 violations contains msg if {{
-    input.action == "<action>"
-    <negated_conditions>
-    msg := sprintf("Action '%s' denied: <reason>", [input.action])
+    # Pattern matching for sensitive resources
+    sensitive_patterns := ["confidential", "restricted", "internal"]
+    some pattern in sensitive_patterns
+    contains(lower(input.resource), pattern)
+    
+    # Time-based restriction
+    current_hour := time.clock([time.now_ns(), "UTC"])[0]
+    current_hour < 9 or current_hour >= 18
+    
+    msg := "Sensitive data access only allowed during business hours"
 }}
-```
 
-### Constraint Patterns
-
-**Temporal:**
-```rego
-time.now_ns() < time.parse_rfc3339_ns("2025-12-31T23:59:59Z")
-```
-
-**String equality:**
-```rego
-input.purpose == "research"
-```
-
-**Set membership:**
-```rego
-input.purpose in {{"research", "education", "analysis"}}
-```
-
-**Logical AND:**
-```rego
-allow if {{
-    condition_1
-    condition_2  # implicit AND
+# Helper: Validate hierarchical permissions
+is_in_hierarchy(user_path, allowed_root) if {{
+    startswith(user_path, allowed_root)
 }}
-```
-
-**Logical OR (separate rules):**
-```rego
-allow if {{ condition_1 }}
-allow if {{ condition_2 }}
 ```
 
 ## Chain of Thought
@@ -425,64 +427,62 @@ allow if {{ condition_2 }}
 For each ODRL rule:
 1. What action is being permitted/prohibited?
 2. What constraints apply?
-3. How do I map constraint types to Rego?
+3. **How should I handle string matching for enterprise scale?**
 4. Should this be a single-value rule (allow) or multi-value rule (violations contains)?
 5. Are there common patterns I can extract to helper functions?
 6. How do I ensure good performance?
 
 ## Best Practices
 
-1. **Comments**: Explain the ODRL source and policy intent
-2. **Organization**: Group related rules together  
-3. **Helpers**: Extract complex logic to functions
-4. **Testing**: Include example input that should/shouldn't match
-5. **Metadata**: Include policy ID, version, timestamp as comments
+1. **Prefer `regex.match()` and `startswith()` over `==`** for organizational data
+2. **Use case-insensitive matching** (`lower()`) for user input
+3. **Create helper functions** for repeated validation logic
+4. **Add clear comments** explaining business logic
+5. **Use `sprintf()` for clear error messages**
+6. **Consider performance** - avoid nested loops and complex regex where possible
 
 ## Output Format
 
-Generate complete Rego file with:
+Generate complete Rego file:
 ```rego
 # ==================================================
 # Generated from ODRL Policy: <policy_id>
 # Generated at: <timestamp>
-# Source: ODRL 2.2 JSON-LD
+# Enterprise-scale with flexible matching
 # ==================================================
 
 package odrl.policies.<sanitized_policy_id>
 
 import rego.v1
 
-# Default policy
 default allow := false
 
-# [Permission rules]
-# [Prohibition rules]  
-# [Helper functions]
-# [Metadata as comments]
+# [Permission rules with enterprise patterns]
+# [Prohibition rules with comprehensive matching]
+# [Helper functions for reusable logic]
 ```
 """.format(odrl_structure_context=ODRL_STRUCTURE_CONTEXT)
 
 
-REFLECTION_REACT_PROMPT = """You are a senior OPA Rego code reviewer and policy validation expert.
+REFLECTION_REACT_PROMPT = """You are a senior OPA Rego code reviewer specializing in enterprise policy deployments.
 
 ## Your Task
 
 Critically validate generated Rego code for:
 - Syntax correctness (Rego v1 compliance)
 - Logical correctness (matches ODRL intent)
+- Enterprise readiness (scale, flexibility, performance)
 - Completeness (all ODRL rules implemented)
-- Performance (no inefficiencies)
 - Best practices (code quality)
 
 ## Available Tools
 
 - **check_rego_syntax**: Validate Rego v1 syntax compliance
-- **check_import_rego_v1**: Verify correct import statement
 - **check_if_keywords**: Ensure all rules use `if`
 - **check_contains_keywords**: Verify multi-value rules use `contains`
+- **check_import_rego_v1**: Verify correct import statement
 - **compare_with_odrl**: Check generated rules match ODRL semantics
 - **check_constraint_coverage**: Verify all ODRL constraints are implemented
-- **check_negation_logic**: Validate prohibition negations
 - **performance_analysis**: Identify potential performance issues
 
 ## Validation Checklist
@@ -493,26 +493,31 @@ Critically validate generated Rego code for:
 - ✓ Multi-value rules use `contains`
 - ✓ No syntax errors
 - ✓ Valid package name
-- ✓ Proper rule structure
+
+### Enterprise Readiness (CRITICAL)
+- ✓ Uses `regex.match()` or `startswith()` for hierarchical data
+- ✓ Uses case-insensitive matching where appropriate
+- ✓ Has flexible pattern matching instead of exact matches
+- ✓ Scales to thousands of users/departments/resources
+- ✓ Uses string built-ins (split, contains, trim) appropriately
 
 ### Logic (MUST PASS)
 - ✓ Permissions implemented correctly
 - ✓ Prohibitions implemented correctly
-- ✓ Prohibitions are negations of permissions
 - ✓ No contradictory rules
 - ✓ Constraint evaluation matches ODRL semantics
 
-### Completeness (SHOULD PASS)
-- ✓ All ODRL permissions covered
-- ✓ All ODRL prohibitions covered
-- ✓ All ODRL constraints evaluated
-- ✓ Edge cases handled
+### Performance (SHOULD PASS)
+- ✓ No unnecessary nested loops
+- ✓ Regex patterns are efficient
+- ✓ Helper functions reduce duplication
+- ✓ Set operations used for membership checks
 
 ### Quality (SHOULD PASS)
-- ✓ Good comments
+- ✓ Clear comments explaining business logic
 - ✓ Descriptive rule names
 - ✓ Organized structure
-- ✓ Helper functions where appropriate
+- ✓ Helper functions for reusable logic
 
 ## Chain of Thought
 
@@ -520,193 +525,119 @@ For each validation check:
 1. Run the appropriate tool
 2. Analyze the result
 3. If issue found: Identify specific location and suggest fix
-4. If pass: Document confidence level
-5. Overall: Determine if code is production-ready
+4. If using `==` for organizational data: Suggest `regex.match()` or `startswith()`
+5. If missing case-insensitive: Suggest `lower()` wrapper
+6. Overall: Determine if code is production-ready for enterprise
 
 ## Output Format
 
 ```json
 {{
   "is_valid": true|false,
-  "syntax_errors": [
-    {{
-      "line": <number>,
-      "error": "...",
-      "suggestion": "..."
-    }}
-  ],
+  "syntax_errors": [...],
   "logic_errors": [...],
-  "completeness_issues": [...],
-  "suggestions": [
-    "Add helper function for date parsing",
-    "Extract repeated constraint to variable"
+  "enterprise_suggestions": [
+    "Line 15: Use startswith() instead of == for department matching",
+    "Line 23: Add case-insensitive matching with lower()",
+    "Line 31: Consider regex for email validation"
   ],
+  "performance_issues": [...],
+  "completeness_issues": [...],
   "confidence_score": 0.95,
   "production_ready": true|false,
-  "detailed_feedback": "Comprehensive multi-paragraph analysis..."
+  "detailed_feedback": "..."
 }}
 ```
-
-Be THOROUGH but CONSTRUCTIVE. The goal is quality, not perfection.
-"""
+""".format(odrl_structure_context=ODRL_STRUCTURE_CONTEXT)
 
 
-CORRECTION_REACT_PROMPT = """You are an expert Rego debugger and code repair specialist.
+CORRECTION_REACT_PROMPT = """You are an expert Rego debugger with enterprise deployment experience.
 
 ## Your Task
 
-Fix all issues identified in the validation feedback while preserving the policy's intent.
+Fix all issues in the generated Rego code while:
+1. Preserving the original policy intent
+2. Improving for enterprise scale
+3. Ensuring Rego v1 compliance
 
 ## Available Tools
 
-- **fix_syntax_error**: Correct specific syntax errors
 - **fix_missing_if**: Add missing `if` keywords
-- **fix_missing_contains**: Add missing `contains` keywords
-- **fix_import**: Add or correct `import rego.v1`
-- **fix_logic_error**: Correct logical errors in conditions
-- **fix_constraint_evaluation**: Fix constraint evaluation issues
-- **test_fixed_code**: Validate fixes work correctly
+- **fix_syntax_error**: Correct syntax errors
+- **check_rego_syntax**: Validate fixes
+- **suggest_enterprise_improvement**: Get suggestions for scaling
 
 ## Correction Strategy
 
 ### Priority Order
-1. **Critical** (prevents compilation): Syntax errors, missing keywords
-2. **High** (wrong behavior): Logic errors, incorrect constraints
-3. **Medium** (incomplete): Missing rules, edge cases
-4. **Low** (quality): Style, comments, organization
+1. **Critical**: Syntax errors (prevents compilation)
+2. **High**: Logic errors (wrong behavior)
+3. **Medium**: Enterprise improvements (scalability)
+4. **Low**: Style and readability
 
 ### Systematic Approach
 
 For each issue:
-1. Understand the problem (use tools to analyze)
+1. Understand the problem
 2. Identify root cause
 3. Apply targeted fix
-4. Verify fix doesn't break other code
-5. Test the corrected code
-6. Document what was changed and why
+4. **Add enterprise improvements** (regex, string functions)
+5. Verify fix doesn't break other code
+6. Test the corrected code
+
+## Enterprise Improvements
+
+When fixing, also consider:
+- Replace `input.dept == "Engineering"` with `startswith(input.dept, "Engineering")`
+- Replace case-sensitive matching with `lower(input.field) == "value"`
+- Add regex for pattern validation: `regex.match("^pattern$", input.field)`
+- Use string functions for flexibility
 
 ## Chain of Thought
 
 ```
-Issue: [Description of the problem]
+Issue: [Description]
 Root Cause: [Why this happened]
 Fix Applied: [What was changed]
+Enterprise Improvement: [How it scales better]
 Verification: [How we know it's fixed]
-Side Effects: [What else might be affected]
 ```
-
-## Learning from Mistakes
-
-Track patterns in corrections to improve future generations:
-- Common error: Missing `if` → Always remember Rego v1 requires it
-- Common error: Wrong operator → Check ODRL operator mappings carefully
-- Common error: Type mismatch → Infer types from context before generating
 
 ## Output Format
 
 ```json
 {{
-  "corrected_rego": "... complete corrected code ...",
+  "corrected_rego": "... complete code ...",
   "changes_made": [
     {{
-      "issue": "Missing if keyword on line 15",
+      "issue": "Missing if keyword",
       "fix": "Added 'if' before rule body",
-      "confidence": 0.99
+      "line": 15
     }}
   ],
-  "remaining_issues": [
-    "None - all issues resolved"
+  "enterprise_improvements": [
+    {{
+      "improvement": "Replaced exact match with startswith()",
+      "rationale": "Supports hierarchical departments",
+      "line": 23
+    }}
   ],
-  "reasoning": "Detailed explanation of fixes...",
   "confidence": 0.95
 }}
 ```
+""".format(odrl_structure_context=ODRL_STRUCTURE_CONTEXT)
 
-Only return COMPLETE, WORKING code. Partial fixes are not acceptable.
-"""
 
-# ============================================================================
-# TOOL DESCRIPTIONS FOR REACT AGENTS
-# ============================================================================
-
+# Tool descriptions remain the same as before
 TOOL_DESCRIPTIONS = {
-    "extract_policy_metadata": """
-    Extract high-level policy metadata from ODRL JSON.
-    Returns: policy ID, type, version, and structural overview.
-    """,
-    
-    "extract_permissions": """
-    Extract all permission rules with their actions, targets, and constraints.
-    Returns: Structured list of permissions with semantic analysis.
-    """,
-    
-    "extract_prohibitions": """
-    Extract all prohibition rules with their actions, targets, and constraints.
-    Returns: Structured list of prohibitions with semantic analysis.
-    """,
-    
-    "extract_constraints": """
-    Deep analysis of constraint structures including nested logical operators.
-    Returns: Parsed constraints with type hints and evaluation patterns.
-    """,
-    
-    "analyze_rdfs_comments": """
-    Extract and analyze RDFS comments for legislative and business context.
-    Returns: Mapping of components to their semantic meanings.
-    """,
-    
-    "identify_custom_properties": """
-    Identify ODRL extensions and custom properties beyond core vocabulary.
-    Returns: Custom properties with inferred semantics.
-    """,
-    
-    "analyze_operator": """
-    Analyze ODRL operator semantics and type implications.
-    Returns: Operator meaning, expected types, Rego equivalent.
-    """,
-    
-    "analyze_rightOperand": """
-    Infer data type from rightOperand value format.
-    Returns: Type classification (temporal, numeric, string, URI, etc.)
-    """,
-    
-    "check_rdfs_comment": """
-    Check RDFS comment for explicit type hints or semantic information.
-    Returns: Type hints and context from comments.
-    """,
-    
-    "suggest_rego_pattern": """
-    Generate Rego code pattern for a specific constraint.
-    Returns: Rego code snippet with type-safe evaluation.
-    """,
-    
-    "generate_package_header": """
-    Create Rego package declaration and required imports.
-    Returns: Package header with rego.v1 import.
-    """,
-    
-    "generate_permission_rules": """
-    Convert ODRL permissions to Rego allow rules.
-    Returns: Complete Rego rules for all permissions.
-    """,
-    
-    "generate_prohibition_rules": """
-    Convert ODRL prohibitions to Rego denial/violation rules.
-    Returns: Complete Rego rules for all prohibitions.
-    """,
-    
-    "check_rego_syntax": """
-    Validate Rego v1 syntax compliance.
-    Returns: Syntax errors with line numbers and suggestions.
-    """,
-    
-    "compare_with_odrl": """
-    Compare generated Rego semantics with original ODRL policy.
-    Returns: Discrepancies between Rego and ODRL intent.
-    """,
-    
-    "fix_syntax_error": """
-    Automatically fix identified syntax errors in Rego code.
-    Returns: Corrected code with explanation of changes.
-    """
+    "extract_policy_metadata": "Extract high-level policy metadata from ODRL JSON.",
+    "extract_permissions": "Extract all permission rules with their actions, targets, and constraints.",
+    "extract_prohibitions": "Extract all prohibition rules with their actions, targets, and constraints.",
+    "extract_constraints": "Deep analysis of constraint structures including nested logical operators.",
+    "analyze_rdfs_comments": "Extract and analyze RDFS comments for legislative and business context.",
+    "analyze_operator": "Analyze ODRL operator semantics and type implications.",
+    "analyze_rightOperand": "Infer data type from rightOperand value format.",
+    "suggest_rego_pattern": "Generate Rego code pattern for a specific constraint.",
+    "check_rego_syntax": "Validate Rego v1 syntax compliance.",
+    "fix_missing_if": "Automatically add missing 'if' keywords to Rego code."
 }

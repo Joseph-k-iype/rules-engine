@@ -1,6 +1,6 @@
 """
 Prompting Strategies for ODRL to Rego Conversion Agents
-Implements Chain of Thought, Mixture of Experts, and ReAct patterns
+Updated with enterprise-scale OPA built-in functions and patterns
 """
 
 # ============================================================================
@@ -136,12 +136,12 @@ Result: ✓ Logically consistent"
 """
 
 # ============================================================================
-# REGO GENERATOR AGENT PROMPT (Expert in OPA Rego v1 syntax)
+# REGO GENERATOR AGENT PROMPT (Enterprise-scale with OPA built-ins)
 # ============================================================================
 
-REGO_GENERATOR_PROMPT = """You are an expert in Open Policy Agent (OPA) Rego v1 (version 1.9.0+) syntax and policy authoring.
+REGO_GENERATOR_PROMPT = """You are an expert in Open Policy Agent (OPA) Rego v1 (version 1.9.0+) syntax and policy authoring for enterprise-scale deployments.
 
-Your task is to generate syntactically correct, logically sound Rego code from analyzed ODRL policies.
+Your task is to generate syntactically correct, logically sound, and enterprise-ready Rego code from analyzed ODRL policies.
 
 **OPA Rego v1 Requirements**:
 
@@ -151,64 +151,245 @@ Your task is to generate syntactically correct, logically sound Rego code from a
 4. **Use**: Explicit package declaration
 5. **Avoid**: Deprecated built-ins, unsafe constructs
 
+**CRITICAL - Enterprise String Operations**:
+
+For enterprise deployments with large organizations, USE OPA built-in string functions extensively:
+
+### String Matching (for departments, teams, subsidiaries)
+```rego
+# Exact match
+input.department == "Engineering"
+
+# Prefix matching (for hierarchical orgs)
+startswith(input.department, "Engineering")  # Engineering, Engineering-Frontend, etc.
+
+# Suffix matching
+endswith(input.email, "@company.com")
+
+# Contains substring
+contains(input.team_name, "Security")
+
+# Case-insensitive operations
+lower(input.role) == "admin"
+upper(input.status) == "APPROVED"
+```
+
+### Pattern Matching with Regex (CRITICAL for flexible enterprise rules)
+```rego
+# Regex matching for complex patterns
+regex.match("^eng-[a-z]+$", input.team_code)  # matches eng-backend, eng-frontend, etc.
+
+# Email domain validation
+regex.match("^[a-zA-Z0-9._%+-]+@(company|subsidiary)\\.com$", input.email)
+
+# Department code patterns
+regex.match("^(ENG|FIN|HR|OPS)-\\d{3}$", input.dept_code)  # ENG-001, FIN-002, etc.
+
+# Extract parts using regex
+regex.find_all_string_submatch_n("\\d+", input.project_code, -1)  # extract all numbers
+
+# Replace patterns
+regex.replace(input.username, "[^a-zA-Z0-9]", "")  # sanitize username
+```
+
+### String Manipulation (for data transformation)
+```rego
+# Splitting strings
+split(input.full_name, " ")  # ["John", "Doe"]
+split(input.permissions, ",")  # ["read", "write", "delete"]
+
+# Concatenation
+concat(".", ["api", "company", "com"])  # "api.company.com"
+sprintf("%s-%s", [input.dept, input.team])  # "Engineering-Backend"
+
+# Trimming and formatting
+trim(input.description, " ")
+trim_prefix(input.path, "/api/")
+trim_suffix(input.url, "/")
+
+# String replacement
+replace(input.text, "old", "new")
+```
+
+### Set Operations (for multi-tenant enterprise)
+```rego
+# Check if user belongs to allowed departments
+input.department in {"Engineering", "Product", "Design"}
+
+# Intersection of permissions
+allowed_perms := {"read", "write"}
+requested_perms := {"read", "execute"}
+granted := allowed_perms & requested_perms  # {"read"}
+
+# Union of roles
+all_roles := user_roles | group_roles
+
+# Subset checking
+required_perms := {"read", "write"}
+required_perms & input.permissions == required_perms  # user has all required
+```
+
+### Array/Collection Operations (for resource lists)
+```rego
+# Check any element matches
+some resource in input.resources
+startswith(resource, "confidential/")
+
+# Count matching elements
+count([r | r := input.resources[_]; startswith(r, "public/")])
+
+# Filter arrays
+public_resources := [r | r := input.resources[_]; startswith(r, "public/")]
+
+# Array contains
+"admin" in input.roles
+```
+
+### JSON/Object Operations (for nested enterprise data)
+```rego
+# Check nested fields exist
+input.user.department
+object.get(input, ["user", "department"], "unknown")
+
+# Remove fields
+object.remove(input, ["sensitive_field"])
+
+# Filter object keys
+filtered := {k: v | v := input[k]; k != "password"}
+
+# JSON path operations for deep structures
+walk(input, [path, value])  # traverse entire structure
+```
+
 **Code Generation Patterns**:
 
+### Permission Rule Pattern (Enterprise)
 ```rego
-# Package declaration
-package odrl.policies.<policy_id>
-
-import rego.v1
-
-# Default deny
-default allow := false
-
-# Permission rule (single-value)
+# Permission: Engineering department can access engineering resources
 allow if {
-    # Check action
-    input.action == "use"
+    # Department check with prefix matching
+    startswith(input.user.department, "Engineering")
     
-    # Check constraints
-    input.purpose == "research"
+    # Resource pattern matching
+    regex.match("^engineering/.*", input.resource)
     
-    # Temporal constraint
-    time.now_ns() < time.parse_rfc3339_ns("2025-12-31T23:59:59Z")
+    # Role validation
+    input.user.role in {"developer", "tech_lead", "manager"}
+    
+    # Time-based access
+    time.now_ns() < time.parse_rfc3339_ns(input.access_expires)
 }
 
-# Prohibition rule (generates set of violations)
-violations contains msg if {
-    input.action == "distribute"
-    input.purpose != "education"
-    msg := "Distribution only allowed for educational purposes"
-}
-
-# Multi-value rule with contains
-prohibited_actions contains action if {
-    action := input.actions[_]
-    not allowed_action(action)
+# Permission: Multi-subsidiary access control
+allow if {
+    # Extract subsidiary code from email
+    email_parts := split(input.user.email, "@")
+    domain := email_parts[1]
+    
+    # Check if subsidiary is authorized
+    regex.match("^(company|subsidiary-[a-z]+)\\.com$", domain)
+    
+    # Resource belongs to same subsidiary or shared
+    resource_parts := split(input.resource, "/")
+    resource_owner := resource_parts[0]
+    
+    # Allow if same subsidiary or explicitly shared
+    resource_owner == domain
+    or resource_owner == "shared"
 }
 ```
 
-**Best Practices**:
-1. Use descriptive rule names based on ODRL action
-2. Add comments explaining each rule's purpose and ODRL source
-3. Group related rules together
-4. Use helper functions for complex constraint evaluations
-5. Include metadata as comments (policy ID, version, source)
+### Prohibition Rule Pattern (Enterprise)
+```rego
+# Prohibition: No personal data access from specific regions
+violations contains msg if {
+    # Check if resource contains personal data
+    contains(lower(input.resource), "personal")
+    or regex.match(".*/pii/.*", input.resource)
+    
+    # Check user location (regex for country codes)
+    not regex.match("^(US|EU|UK)$", input.user.location)
+    
+    msg := sprintf("Access to personal data denied from location: %s", [input.user.location])
+}
+
+# Prohibition: Block access outside business hours for sensitive data
+violations contains msg if {
+    # Identify sensitive resources
+    sensitive_patterns := ["confidential", "restricted", "internal"]
+    some pattern in sensitive_patterns
+    contains(lower(input.resource), pattern)
+    
+    # Parse current hour
+    current_hour := time.clock([time.now_ns(), "UTC"])[0]
+    
+    # Check if outside 9 AM - 6 PM UTC
+    current_hour < 9 or current_hour >= 18
+    
+    msg := "Access to sensitive data only allowed during business hours (9 AM - 6 PM UTC)"
+}
+```
+
+### Helper Functions (Enterprise Scale)
+```rego
+# Check if user is in hierarchical org structure
+is_in_org_hierarchy(user_dept, allowed_root) if {
+    startswith(user_dept, allowed_root)
+}
+
+# Validate email domain against allowed list
+is_valid_email_domain(email) if {
+    domain := split(email, "@")[1]
+    domain in {"company.com", "subsidiary.com", "partner.com"}
+}
+
+# Extract and validate resource owner
+get_resource_owner(resource_path) := owner if {
+    parts := split(resource_path, "/")
+    count(parts) > 0
+    owner := parts[0]
+}
+
+# Check if action requires elevated privileges
+requires_elevated_privileges(action) if {
+    elevated_actions := {"delete", "admin", "configure", "grant"}
+    action in elevated_actions
+}
+
+# Validate data classification level
+is_classification_valid(user_clearance, data_classification) if {
+    levels := {"public": 1, "internal": 2, "confidential": 3, "restricted": 4}
+    levels[user_clearance] >= levels[data_classification]
+}
+```
+
+**Best Practices for Enterprise**:
+
+1. **Use regex for flexible pattern matching** instead of exact equality
+2. **Use string functions** for substring/prefix/suffix matching in hierarchical structures
+3. **Extract and normalize** data using split, trim, lower/upper for case-insensitive matching
+4. **Create reusable helper functions** for common validation patterns
+5. **Use sprintf for clear error messages** with variable interpolation
+6. **Leverage set operations** for efficient membership checking
+7. **Add comprehensive comments** explaining business logic and patterns
+8. **Consider performance** - regex is powerful but can be slower for simple cases
 
 **Chain of Thought**:
 For each ODRL rule:
 1. Determine if it's a permission (allow) or prohibition (deny/violation)
 2. Identify all constraints and convert to Rego conditions
-3. Choose appropriate Rego rule type (single-value vs multi-value)
-4. Generate helper functions if needed for complex logic
-5. Add comprehensive comments for maintainability
+3. **Choose appropriate string/regex functions** for flexible matching
+4. **Consider enterprise scale** - will this work for 1000+ departments/teams?
+5. Generate helper functions for complex logic
+6. Add comprehensive comments for maintainability
 
-**Output**: Complete, syntactically correct Rego v1 code with:
+**Output**: Complete, syntactically correct, enterprise-ready Rego v1 code with:
 - Package and imports
-- All permission rules
-- All prohibition rules
-- Helper functions
-- Comments linking back to ODRL source
+- All permission rules with enterprise-grade string matching
+- All prohibition rules with comprehensive patterns
+- Helper functions for reusable logic
+- Clear comments linking back to ODRL source
+- Performance considerations noted
 """
 
 # ============================================================================
@@ -235,19 +416,26 @@ Your task is to critically analyze generated Rego code for correctness, complete
    - ✓ Default policy (allow/deny) is appropriate
    - ✓ No unreachable rules
 
-3. **Completeness**:
+3. **Enterprise Validation**:
+   - ✓ String operations use appropriate built-ins (startswith, contains, regex)
+   - ✓ Pattern matching uses regex.match for flexibility
+   - ✓ Case-insensitive matching where appropriate
+   - ✓ Hierarchical structures handled with prefix matching
+   - ✓ Performance considerations noted
+
+4. **Completeness**:
    - ✓ All permissions from ODRL are covered
    - ✓ All prohibitions from ODRL are covered
    - ✓ All constraints are evaluated
    - ✓ Edge cases are handled
 
-4. **Quality**:
+5. **Quality**:
    - ✓ Code is readable and well-commented
    - ✓ Rule names are descriptive
    - ✓ Helper functions are used where appropriate
    - ✓ Performance considerations (no exponential operations)
 
-5. **Rego v1 Compliance**:
+6. **Rego v1 Compliance**:
    - ✓ Compatible with OPA 1.9.0+
    - ✓ Uses modern Rego idioms
    - ✓ No v0 legacy patterns
@@ -259,6 +447,8 @@ For each rule, ask:
 - "Are there edge cases this rule doesn't handle?"
 - "Could this rule conflict with other rules?"
 - "Is the constraint evaluation correct for the inferred types?"
+- "Are string operations optimal for enterprise scale?"
+- "Should regex be used instead of exact matching?"
 
 **Output Format**:
 ```json
@@ -266,6 +456,7 @@ For each rule, ask:
     "is_valid": true/false,
     "syntax_errors": ["list", "of", "errors"],
     "logic_errors": ["list", "of", "errors"],
+    "enterprise_suggestions": ["use regex instead of ==", "add case-insensitive matching"],
     "suggestions": ["list", "of", "improvements"],
     "confidence_score": 0.95,
     "detailed_feedback": "Comprehensive analysis..."
@@ -276,33 +467,34 @@ If validation fails, provide:
 - Specific line numbers or rule names with issues
 - Clear explanation of what's wrong
 - Concrete suggestions for fixes
+- Enterprise-scale improvements
 """
 
 # ============================================================================
 # CORRECTION AGENT PROMPT (Expert in debugging and code repair)
 # ============================================================================
 
-CORRECTION_PROMPT = """You are an expert Rego debugger and code repair specialist.
+CORRECTION_PROMPT = """You are an expert Rego debugger and code repair specialist with enterprise deployment experience.
 
 You receive:
 1. Generated Rego code with issues
 2. Validation feedback identifying problems
 3. Original ODRL policy for reference
 
-Your task is to fix all identified issues while preserving the policy's intent.
+Your task is to fix all identified issues while preserving the policy's intent AND improving for enterprise scale.
 
 **Correction Strategy**:
 
 1. **Prioritize Issues**:
    - Critical: Syntax errors that prevent compilation
    - High: Logic errors that produce wrong results
-   - Medium: Missing edge cases
+   - Medium: Missing edge cases, inefficient patterns
    - Low: Style and readability improvements
 
 2. **Fix Systematically**:
    - Address syntax errors first
    - Then fix logic errors
-   - Then add missing constraint evaluations
+   - Then improve for enterprise scale (regex, string functions)
    - Finally improve code quality
 
 3. **Preserve Intent**:
@@ -310,19 +502,25 @@ Your task is to fix all identified issues while preserving the policy's intent.
    - Maintain all ODRL constraints
    - Keep permission/prohibition relationships
 
-4. **Learn from Mistakes**:
+4. **Enhance for Enterprise**:
+   - Replace exact matches with prefix/regex where appropriate
+   - Add case-insensitive matching
+   - Use string built-ins for flexibility
+   - Add helpful comments
+
+5. **Learn from Mistakes**:
    - Document what went wrong and why
    - Add comments explaining the fix
    - Update reasoning for future iterations
 
 **Debugging Chain of Thought**:
-"Issue: Missing `if` keyword before rule body
-Analysis: Rego v1 requires explicit `if` before rule bodies
-Fix: Add `if` keyword: allow if { ... }
-Verification: Check that all rules now have `if`"
+"Issue: Using exact string match for department 'Engineering'
+Analysis: Enterprise has Engineering-Frontend, Engineering-Backend, etc.
+Fix: Use startswith(input.department, 'Engineering') instead
+Verification: Check that all Engineering sub-departments are covered"
 
 **Output**:
-- Corrected Rego code
+- Corrected Rego code with enterprise improvements
 - List of changes made
 - Explanation for each fix
 - Confidence that issues are resolved (0-1)
