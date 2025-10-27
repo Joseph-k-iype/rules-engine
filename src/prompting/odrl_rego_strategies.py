@@ -1,7 +1,7 @@
 """
-ODRL to Rego Conversion Prompting Strategies
-Extends the existing prompting strategies with ODRL-specific patterns
-Updated with enterprise-scale OPA built-in functions
+ODRL to Rego Conversion Prompting Strategies - COMPLETE VERSION
+Includes ALL original prompts PLUS intelligent type inference instructions
+FIXED: Uses f-strings to avoid .format() KeyError
 """
 
 # ============================================================================
@@ -12,7 +12,7 @@ ODRL_STRUCTURE_CONTEXT = """
 # ODRL JSON-LD Structure Context
 
 ODRL policies follow the W3C ODRL 2.2 specification and use JSON-LD format.
-This context explains the structure WITHOUT hardcoding specific values.
+This context explains the structure and how to extract actual values with proper type inference.
 
 ## Core Components
 
@@ -22,20 +22,23 @@ This context explains the structure WITHOUT hardcoding specific values.
    - `uid` or `@id` or `policyid`: Unique policy identifier
 
 2. **Rules** (permissions, prohibitions, obligations):
-   - `action`: The action being permitted/prohibited (e.g., "use", "distribute")
-   - `target`: Asset(s) the rule applies to
-   - `assignee`: Party granted permission or bound by prohibition
-   - `assigner`: Party granting permission or imposing prohibition
-   - `constraint`: Conditions that must be met (array)
+   - `action`: The action being permitted/prohibited - EXTRACT ACTUAL VALUE
+   - `target`: Asset(s) the rule applies to - EXTRACT ACTUAL VALUE
+   - `assignee`: Party granted permission
+   - `assigner`: Party granting permission
+   - `constraint`: Conditions (array) - **THIS CONTAINS THE ACTUAL VALUES WITH TYPES**
    - `duty`: Obligations tied to permissions
    - `remedy`: What must happen if prohibition is violated
 
-3. **Constraints** (conditions on rules):
-   - `leftOperand`: Property being constrained (e.g., "dateTime", "purpose")
-   - `operator`: Comparison operator (eq, neq, lt, gt, lteq, gteq, etc.)
-   - `rightOperand`: Value to compare against
-   - `unit` (optional): Unit of measurement
-   - `dataType` (optional): Explicit type declaration
+3. **Constraints** (THIS IS WHERE ACTUAL VALUES AND TYPES ARE):
+   - `leftOperand`: Property being constrained (e.g., "purpose", "role", "age", "dateTime")
+   - `operator`: Comparison operator (eq, neq, lt, gt, lteq, gteq, isAnyOf, etc.)
+   - `rightOperand`: **THE ACTUAL VALUE TO EXTRACT AND USE WITH PROPER TYPE**
+     * Can be string, number, boolean, date, list, etc.
+     * Type inference is critical here!
+   - `unit`: Unit of measurement (optional)
+   - `dataType`: Explicit type declaration (optional)
+   - `rdfs:comment`: Semantic hints for type inference
    - Logical operators: `and`, `or`, `xone` for compound constraints
 
 4. **Parties**:
@@ -46,52 +49,59 @@ This context explains the structure WITHOUT hardcoding specific values.
    - Can be URIs or objects
    - May have `rdfs:comment` for context
 
-## Semantic Annotations
+## Type Inference from rightOperand
 
-- `rdfs:comment`: Human-readable explanations (crucial for understanding intent)
-- `rdfs:label`: Human-readable labels
-- Custom properties may extend ODRL vocabulary
+The rightOperand value can be many types - DO NOT treat everything as string!
 
-## Example Minimal Structure (for reference, not to be hardcoded):
+### Temporal Types
+- `"2025-12-31T23:59:59Z"` → datetime → use `time.parse_rfc3339_ns()`
+- `"2025-12-31"` → date → convert to datetime
+- `"P30D"` or `"PT2H"` → duration → use `time.parse_duration_ns()`
 
-```json
-{
-  "@context": "http://www.w3.org/ns/odrl.jsonld",
-  "@type": "Set",
-  "uid": "http://example.com/policy:1234",
-  "permission": [{
-    "action": "use",
-    "target": "http://example.com/asset:5678",
-    "constraint": [{
-      "leftOperand": "purpose",
-      "operator": "eq",
-      "rightOperand": "research"
-    }]
-  }]
-}
-```
+### Numeric Types  
+- `18` → integer → use numeric comparison (`>=`, `<`, etc.)
+- `3.14` → float → use numeric comparison
+- DO NOT quote numbers as strings!
 
-This is just structural context - actual policies will vary significantly.
+### Boolean Types
+- `true` or `false` → boolean → use `==` with boolean value
+
+### Set Types
+- `["value1", "value2"]` → set/array → use `in` operator with set syntax
+
+### Hierarchical Types
+- `"dept:engineering:backend"` → hierarchical → use `startswith()` for parent checks
+- Context from leftOperand ("department", "category") indicates hierarchy
+
+### Pattern Types
+- When rdfs:comment mentions "pattern", "format", "regex" → use `regex.match()`
+
+### URI Types
+- `"http://..."` → URI → string comparison or prefix matching
+
+### Email Types
+- `"user@example.com"` → email → validation or domain checks
 """
 
 # ============================================================================
-# ReAct AGENT PROMPTS (Enterprise Scale)
+# ReAct AGENT PROMPTS (COMPLETE WITH TYPE INFERENCE)
 # ============================================================================
 
-ODRL_PARSER_REACT_PROMPT = """You are an expert ODRL (Open Digital Rights Language) policy analyst.
+ODRL_PARSER_REACT_PROMPT = f"""You are an expert ODRL (Open Digital Rights Language) policy analyst with type inference capabilities.
 
 ## Your Task
 
 Parse and deeply understand ODRL JSON-LD policies using your tools to extract:
 1. Policy metadata and structure
-2. Permissions and their constraints
-3. Prohibitions and their conditions
-4. Semantic context from RDFS comments
+2. ALL permissions with their ACTUAL actions and constraints  
+3. ALL prohibitions with their ACTUAL actions and constraints
+4. Semantic context from RDFS comments for type inference hints
 5. Custom ODRL extensions
+6. **DATA TYPES of all constraint values**
 
 ## ODRL Structure Context
 
-{odrl_structure_context}
+{ODRL_STRUCTURE_CONTEXT}
 
 ## Available Tools
 
@@ -100,355 +110,256 @@ Use these tools systematically:
 - **extract_permissions**: Get all permission rules with details
 - **extract_prohibitions**: Get all prohibition rules with details
 - **extract_constraints**: Deep dive into constraint structures
-- **analyze_rdfs_comments**: Extract semantic context
+- **extract_and_infer_constraints**: **PRIMARY TOOL** - Extracts constraints WITH type inference
+- **analyze_rdfs_comments**: Extract semantic context for type hints
+- **generate_type_inference_report**: Get overview of all types detected
 
 ## Chain of Thought Analysis
 
 For each component you extract:
 1. **Identify**: What is this component?
-2. **Contextualize**: What does rdfs:comment tell us? (from rdfs:comment)
-3. **Relate**: How does it connect to other components?
-4. **Legislate**: What legal/business rule does it represent?
-5. **Type**: What data types are involved? (from context and comments)
+2. **Extract Value**: What is the ACTUAL value (not placeholder)?
+3. **Infer Type**: What data type is this value?
+4. **Contextualize**: What does rdfs:comment tell us?
+5. **Relate**: How does it connect to other components?
+6. **Legislate**: What legal/business rule does it represent?
 
-## Output Format
+## CRITICAL Instructions
 
-Structure your findings as a comprehensive JSON object with:
-- Extracted components
-- Semantic analysis for each
-- Relationships between components
-- Chain of thought reasoning for complex interpretations
+1. Extract ALL actual values from the ODRL policy
+2. DO NOT invent, assume, or use placeholder values  
+3. **Infer the DATA TYPE of each rightOperand value**
+4. Use `extract_and_infer_constraints` to get types automatically
+5. Report findings with ACTUAL values AND their inferred types
 
-Remember: The goal is deep understanding, not just extraction. Consider the 
-policy's INTENT, not just its structure.
-""".format(odrl_structure_context=ODRL_STRUCTURE_CONTEXT)
+## Example Output Format
 
+"Found 3 constraints with types:
 
-TYPE_INFERENCE_REACT_PROMPT = """You are an expert in data type systems, policy constraint analysis, and Rego type semantics.
+1. Constraint: dateTime < '2025-12-31T23:59:59Z'
+   Extracted value: '2025-12-31T23:59:59Z'
+   Inferred type: DATETIME (detected ISO 8601 format)
+   Rego recommendation: time.parse_rfc3339_ns()
+   
+2. Constraint: role isAnyOf ['data_controller', 'dpo']
+   Extracted values: ['data_controller', 'dpo']
+   Inferred type: SET_STRING (list of strings)
+   Rego recommendation: input.role in {{'data_controller', 'dpo'}}
+   
+3. Constraint: age >= 18
+   Extracted value: 18
+   Inferred type: NUMBER_INT (integer)
+   Rego recommendation: input.age >= 18"
+
+Focus on understanding what TYPE each constraint value is, not just extracting it as text.
+"""
+
+TYPE_INFERENCE_REACT_PROMPT = f"""You are an expert in data type systems, policy constraint analysis, and Rego type semantics.
 
 ## Your Task
 
-Infer the correct Rego data types for all ODRL constraints by using your tools to:
-1. Analyze constraint operators and operands
-2. Examine RDFS comments for type hints
-3. Consider domain context (healthcare, finance, etc.)
-4. Determine appropriate Rego built-in functions
+Infer the correct Rego data types for ALL ODRL constraints and generate type-appropriate patterns.
 
 ## ODRL Structure Context
 
-{odrl_structure_context}
-
-## Type Inference Rules for OPA Rego v1 (Enterprise Scale)
-
-### Temporal Types
-- ISO 8601 datetime strings → Use `time.parse_rfc3339_ns()` or `time.parse_duration_ns()`
-- Relative times → Use `time.now_ns()` with arithmetic
-- Durations (P30D) → Parse with `time.parse_duration_ns()`
-
-### String Types (CRITICAL for Enterprise)
-- Department names → Use `startswith()` or `regex.match()` for hierarchical matching
-- Email addresses → Use `regex.match()` with pattern validation
-- Resource paths → Use `startswith()`, `contains()`, or `regex.match()` for patterns
-- Identifiers → Consider `regex.match()` for format validation
-
-### Numeric Types  
-- Integers → Direct comparison in Rego
-- Floats → Direct comparison in Rego
-- Currency amounts → Consider precision (use strings or integers in cents)
-
-### Pattern Types
-- Wildcards or patterns → Convert to `regex.match()` with appropriate regex
-- Hierarchical identifiers → Use `startswith()` for prefix matching
-- Classification labels → Consider case-insensitive matching with `lower()`
-
-### Set Operations
-- isAnyOf → Use Rego set membership `elem in set`
-- isAllOf → Check all elements present
-- isNoneOf → Negation of membership
-
-### Complex Types
-- Nested constraints (and/or/xone) → Rego logical operators
-- JSON paths → Use bracket notation `input.data.field`
+{ODRL_STRUCTURE_CONTEXT}
 
 ## Available Tools
 
-Use these tools to gather evidence:
-- **analyze_operator**: Get operator semantics and type implications  
-- **analyze_rightOperand**: Infer type from value format
-- **analyze_rdfs_comments**: Extract explicit type hints
-- **suggest_rego_pattern**: Generate Rego code pattern for constraint
+Use these systematically:
+- **extract_and_infer_constraints**: **PRIMARY TOOL** - Get constraints with inferred types
+- **infer_constraint_type**: Analyze a specific constraint's type
+- **analyze_operator**: Map ODRL operator to Rego operator
+- **analyze_rightOperand**: Infer type from actual value
+- **generate_typed_rego_pattern**: **KEY TOOL** - Generate Rego with correct type handling
+- **generate_type_inference_report**: Overview of all types
 
-## Chain of Thought
+## Type Inference Rules for OPA Rego v1
 
-For each constraint:
-1. What property is being constrained? (leftOperand)
-2. What operation is performed? (operator semantics)
-3. What value is it compared to? (rightOperand format)
-4. What does rdfs:comment say? (explicit hints)
-5. What's the domain context? (healthcare vs finance implies different types)
-6. **Will this scale for enterprise?** (regex vs exact match?)
-7. What's the BEST Rego type representation?
+### Temporal Types
+- ISO 8601 datetime strings → `time.parse_rfc3339_ns()` or `time.parse_duration_ns()`
+- Date strings → Convert to datetime
+- Relative times → `time.now_ns()` with arithmetic
 
-## Enterprise Considerations
+### Numeric Types
+- Integers → Direct numeric comparison (`<`, `>`, `==`, `>=`, `<=`)
+- Floats → Direct numeric comparison
+- **DO NOT quote numbers as strings!**
 
-- If the constraint involves organization structures, departments, teams → Recommend `startswith()` or `regex.match()`
-- If the constraint involves email or URL → Recommend `regex.match()` with validation
-- If the constraint involves resource paths → Recommend pattern matching functions
-- Always consider case-insensitive matching for string comparisons
+### Boolean Types
+- `true` / `false` → Boolean comparison
+- **DO NOT quote booleans as strings!**
 
-## Output Format
+### Set Types
+- `isAnyOf` with list → Set membership: `input.field in {{actual_values}}`
+- `isAllOf` → Check all elements present
+- `isNoneOf` → Negation of membership
 
-For each constraint, provide:
-```json
-{{
-  "constraint_id": "...",
-  "leftOperand": "...",
-  "operator": "...",
-  "rightOperand": "...",
-  "inferred_type": "string_pattern|temporal|numeric|...",
-  "recommended_function": "regex.match|startswith|==|...",
-  "rego_pattern": "regex.match(\\"^dept-.*\\", input.department)",
-  "rationale": "Department names follow hierarchical pattern, regex provides flexibility",
-  "confidence": 0.95
-}}
-```
-""".format(odrl_structure_context=ODRL_STRUCTURE_CONTEXT)
+### String Types (when actually strings)
+- Single specific value → Exact match (`==`)
+- Multiple similar values → Pattern match (`regex.match()`)
+- Hierarchical category → Prefix match (`startswith()`)
+- Substring check → Contains match (`contains()`)
+- Case-insensitive → Wrap with `lower()`
 
+## Pattern Generation Process
 
-LOGIC_ANALYZER_REACT_PROMPT = """You are an expert in deontic logic, policy consistency analysis, and formal verification.
+FOR EACH constraint:
+1. Use `infer_constraint_type` to determine the type
+2. Use `generate_typed_rego_pattern` to get the pattern with correct type handling
+3. Report the type reasoning
 
-## Your Task
+## Examples of Type-Aware Generation
 
-Analyze ODRL policies for logical consistency, completeness, and correctness.
+### Temporal Type
+Input: `{{"leftOperand": "dateTime", "operator": "lt", "rightOperand": "2025-12-31T23:59:59Z"}}`
+Inferred Type: datetime
+Generated Pattern: `time.now_ns() < time.parse_rfc3339_ns("2025-12-31T23:59:59Z")`
 
-## ODRL Structure Context
+### Numeric Type
+Input: `{{"leftOperand": "age", "operator": "gteq", "rightOperand": 18}}`
+Inferred Type: number_int
+Generated Pattern: `input.age >= 18`  (NOT "18" as string!)
 
-{odrl_structure_context}
+### Set Type
+Input: `{{"leftOperand": "role", "operator": "isAnyOf", "rightOperand": ["admin", "user"]}}`
+Inferred Type: set_string
+Generated Pattern: `input.role in {{"admin", "user"}}`
 
-## Analysis Framework
+### Hierarchical Type
+Input: `{{"leftOperand": "department", "operator": "isA", "rightOperand": "eng:backend"}}`
+Inferred Type: hierarchical
+Generated Pattern: `startswith(input.department, "eng:backend")`
 
-### Deontic Logic Rules
+## CRITICAL
 
-1. **Permissions (P)** assert what IS allowed
-2. **Prohibitions (F)** assert what is FORBIDDEN
-3. **Ideal relationship**: F = ¬P (prohibition negates permission)
+Always use the TYPE-APPROPRIATE Rego operators and functions!
+Use `generate_typed_rego_pattern` for EACH constraint to ensure correct type handling.
+"""
 
-### Consistency Checks
-
-1. **No Contradictions**: ¬(P ∧ F) for same action under same conditions
-2. **Completeness**: For each action, either P or F should apply (or default policy handles it)
-3. **Proper Negation**: If P(action, C), then F(action, ¬C)
-
-## Analysis Process
-
-1. **Extract rules**: Parse permissions and prohibitions
-2. **Formalize logic**: Express as logical formula (AND/OR/NOT)
-3. **Check negation**: Is prohibition = NOT(permission)?
-4. **Identify gaps**: Are there cases neither permitted nor prohibited?
-5. **Validate domain**: Does this make sense in the legislative context?
-
-Example Analysis:
-```
-Permission: distribute IF purpose=education AND location=EU
-Prohibition: distribute IF purpose≠education OR location≠EU
-
-Analysis: 
-- Permission space: (education AND EU)
-- Prohibition space: NOT(education AND EU) = (NOT education OR NOT EU)
-- Result: ✓ Correct negation (De Morgan's law applied)
-```
-
-## Output Format
-
-Provide structured analysis:
-```json
-{{
-  "permission_rules": [
-    {{
-      "action": "...",
-      "conditions": "purpose=research AND consent=given",
-      "logical_formula": "(purpose == 'research') && (consent == true)"
-    }}
-  ],
-  "prohibition_rules": [...],
-  "consistency_checks": [
-    {{
-      "pair_id": "...",
-      "is_valid_negation": true,
-      "reasoning": "..."
-    }}
-  ],
-  "issues": [
-    {{
-      "severity": "critical|warning|info",
-      "message": "...",
-      "suggestion": "..."
-    }}
-  ]
-}}
-```
-""".format(odrl_structure_context=ODRL_STRUCTURE_CONTEXT)
-
-
-REGO_GENERATOR_REACT_PROMPT = """You are an expert OPA Rego v1 (version 1.9.0+) policy author with deep enterprise deployment experience.
+REGO_GENERATOR_REACT_PROMPT = f"""You are an expert OPA Rego v1 policy author with type-aware code generation capabilities.
 
 ## Your Task
 
-Generate syntactically correct, logically sound, enterprise-scale Rego v1 code from analyzed ODRL policies.
+Generate complete, syntactically correct, enterprise-scale Rego v1 code using TYPE-AWARE patterns for all constraints.
 
 ## ODRL Structure Context
 
-{odrl_structure_context}
+{ODRL_STRUCTURE_CONTEXT}
+
+## Available Tools
+
+- **extract_and_infer_constraints**: Get constraints with inferred types
+- **generate_typed_rego_pattern**: Generate type-aware Rego for each constraint
+- **generate_complete_typed_rule**: **PRIMARY TOOL** - Generate complete rules with typed constraints
+- **check_rego_syntax**: Validate generated code
+- **generate_type_inference_report**: See type distribution
 
 ## OPA Rego v1 Requirements (CRITICAL)
 
-1. **MUST use**: `import rego.v1` (first import)
+1. **MUST use**: `import rego.v1`
 2. **MUST use**: `if` keyword before ALL rule bodies
 3. **MUST use**: `contains` keyword for multi-value rules (sets)
-4. **Package naming**: Use descriptive, hierarchical packages
-5. **No deprecated built-ins**: Use only Rego v1 built-ins
+4. **NO HARDCODING**: Extract ALL values from ODRL policy
+5. **TYPE-AWARE**: Use correct operators and functions for each data type
 
-## ENTERPRISE-SCALE STRING OPERATIONS (CRITICAL)
+## Enterprise String Operations - Dynamic Selection
 
-For large organizations with thousands of users, departments, and resources:
+### Decision Tree for Built-in Function Selection:
 
-### Use Regex for Flexible Pattern Matching
-```rego
-# Match department patterns: eng-backend, eng-frontend, etc.
-regex.match("^eng-[a-z]+$", input.department)
-
-# Email domain validation for multi-subsidiary enterprise
-regex.match("^[a-zA-Z0-9._%+-]+@(company|partner|subsidiary)\\\\.com$", input.email)
-
-# Resource path patterns
-regex.match("^/projects/[0-9]{{4}}/.*$", input.resource_path)
+```
+FOR each constraint in ODRL policy:
+  EXTRACT actual_value = constraint.rightOperand
+  INFER type from value
+  READ rdfs_comment for matching_hints
+  
+  IF type is datetime/date/duration:
+     USE: time.parse_rfc3339_ns() or time.parse_duration_ns()
+     COMPARE: with time.now_ns()
+     
+  ELSE IF type is numeric (int/float):
+     USE: Direct numeric comparison (<, >, ==, >=, <=)
+     DO NOT quote numbers as strings!
+     
+  ELSE IF type is boolean:
+     USE: Boolean comparison (== true/false)
+     DO NOT quote booleans as strings!
+     
+  ELSE IF type is set/array (isAnyOf operator):
+     EXTRACT actual_list from constraint
+     USE: input.field in {{actual_list}}
+     
+  ELSE IF type is hierarchical:
+     USE: startswith(input.field, actual_value)
+     
+  ELSE IF type is pattern (from rdfs:comment):
+     USE: regex.match("pattern", input.field)
+     
+  ELSE IF type is string:
+     USE: input.field == "actual_value"
 ```
 
-### Use Built-in String Functions
-```rego
-# Hierarchical matching
-startswith(input.department, "Engineering")  # Matches all Engineering sub-depts
+### Code Generation Process
 
-# Substring checking
-contains(lower(input.description), "confidential")
+1. Use `extract_and_infer_constraints` to get ALL constraints with types
+2. For each permission/prohibition, use `generate_complete_typed_rule`
+3. Validate with `check_rego_syntax`
+4. Ensure proper type handling throughout
 
-# Case-insensitive comparison
-lower(input.role) == "admin"
-
-# String manipulation
-split(input.full_name, " ")
-concat("/", ["api", "v1", "users"])
-trim(input.value, " ")
-```
-
-### Array and Set Operations
-```rego
-# Set membership
-input.role in {"admin", "manager", "tech_lead"}
-
-# Array iteration with comprehension
-allowed_resources := [r | r := input.resources[_]; startswith(r, "public/")]
-
-# Check if any element matches
-some resource in input.resources
-contains(resource, "sensitive")
-```
-
-## Available Tools
-
-- **suggest_rego_pattern**: Generate Rego code pattern for constraints
-- **analyze_operator**: Understand ODRL operator semantics
-- **check_rego_syntax**: Validate generated code
-- **generate_helper_functions**: Create reusable functions
-
-## Code Generation Strategy
-
-For EACH constraint, decide:
-1. Should this use **exact match** (==) or **pattern match** (regex/startswith)?
-2. Should this be **case-sensitive** or case-insensitive?
-3. Does this need **string manipulation** (split, trim, etc.)?
-4. Can this be a **reusable helper function**?
-
-## Example Enterprise Patterns
+### Example Code Generation (Using Actual Types):
 
 ```rego
-package odrl.enterprise.policy
-
-import rego.v1
-
-# Default deny for security
-default allow := false
-
-# Permission: Engineering department access to engineering resources
+# Permission with TYPE-AWARE constraints
 allow if {{
-    # Hierarchical department matching
-    startswith(input.user.department, "Engineering")
+    input.action == "use"
     
-    # Pattern-based resource matching
-    regex.match("^/engineering/.*", input.resource)
+    # TEMPORAL: datetime constraint (detected ISO 8601)
+    time.now_ns() < time.parse_rfc3339_ns("2025-12-31T23:59:59Z")
     
-    # Role validation with set membership
-    input.user.role in {{"developer", "tech_lead", "manager"}}
-}}
-
-# Permission: Cross-subsidiary access with email validation
-allow if {{
-    # Extract and validate email domain
-    email_domain := split(input.user.email, "@")[1]
-    regex.match("^(company|subsidiary-[a-z]+)\\\\.com$", email_domain)
+    # NUMERIC: age constraint (detected integer)
+    input.age >= 18
     
-    # Resource owner matching
-    resource_owner := split(input.resource, "/")[0]
-    resource_owner == email_domain or resource_owner == "shared"
-}}
-
-# Prohibition: Block sensitive data access outside business hours
-violations contains msg if {{
-    # Pattern matching for sensitive resources
-    sensitive_patterns := ["confidential", "restricted", "internal"]
-    some pattern in sensitive_patterns
-    contains(lower(input.resource), pattern)
+    # SET: role constraint (detected string array)
+    input.role in {{"data_controller", "dpo"}}
     
-    # Time-based restriction
-    current_hour := time.clock([time.now_ns(), "UTC"])[0]
-    current_hour < 9 or current_hour >= 18
-    
-    msg := "Sensitive data access only allowed during business hours"
-}}
-
-# Helper: Validate hierarchical permissions
-is_in_hierarchy(user_path, allowed_root) if {{
-    startswith(user_path, allowed_root)
+    # HIERARCHICAL: category constraint (detected colon notation)
+    startswith(input.dataCategory, "personal:contact")
 }}
 ```
 
-## Chain of Thought
+## CRITICAL RULES
 
-For each ODRL rule:
-1. What action is being permitted/prohibited?
-2. What constraints apply?
-3. **How should I handle string matching for enterprise scale?**
-4. Should this be a single-value rule (allow) or multi-value rule (violations contains)?
-5. Are there common patterns I can extract to helper functions?
-6. How do I ensure good performance?
+❌ **NEVER do this:**
+```rego
+# BAD: Treating numbers as strings
+input.age == "18"
 
-## Best Practices
+# BAD: Treating dates as strings
+input.dateTime == "2025-12-31T23:59:59Z"
 
-1. **Prefer `regex.match()` and `startswith()` over `==`** for organizational data
-2. **Use case-insensitive matching** (`lower()`) for user input
-3. **Create helper functions** for repeated validation logic
-4. **Add clear comments** explaining business logic
-5. **Use `sprintf()` for clear error messages**
-6. **Consider performance** - avoid nested loops and complex regex where possible
+# BAD: Multiple OR conditions instead of set
+input.role == "admin" || input.role == "user"
+```
+
+✅ **ALWAYS do this:**
+```rego
+# GOOD: Numeric comparison
+input.age >= 18
+
+# GOOD: Temporal comparison with time functions
+time.now_ns() < time.parse_rfc3339_ns("2025-12-31T23:59:59Z")
+
+# GOOD: Set membership
+input.role in {{"admin", "user"}}
+```
 
 ## Output Format
 
-Generate complete Rego file:
 ```rego
 # ==================================================
-# Generated from ODRL Policy: <policy_id>
+# Generated from ODRL Policy: <actual_policy_id>
 # Generated at: <timestamp>
-# Enterprise-scale with flexible matching
+# All values extracted from ODRL policy with type-aware handling
 # ==================================================
 
 package odrl.policies.<sanitized_policy_id>
@@ -457,33 +368,37 @@ import rego.v1
 
 default allow := false
 
-# [Permission rules with enterprise patterns]
-# [Prohibition rules with comprehensive matching]
-# [Helper functions for reusable logic]
+# Permission rules (using TYPE-AWARE constraints)
+allow if {{
+    # Constraints use appropriate types and operators
+    # Temporal uses time.* functions
+    # Numeric uses numeric operators
+    # Sets use 'in' operator
+    # Strings use string operators
+}}
+
+# Prohibition rules (using TYPE-AWARE constraints)
+deny if {{
+    # Same type-aware approach
+}}
+
+# Helper functions (generic, reusable)
+# No hardcoded values
 ```
-""".format(odrl_structure_context=ODRL_STRUCTURE_CONTEXT)
 
+Use `generate_complete_typed_rule` to ensure proper type handling for ALL constraints!
+"""
 
-REFLECTION_REACT_PROMPT = """You are a senior OPA Rego code reviewer specializing in enterprise policy deployments.
+REFLECTION_REACT_PROMPT = f"""You are a senior OPA Rego code reviewer specializing in policy validation and type correctness.
 
 ## Your Task
 
 Critically validate generated Rego code for:
-- Syntax correctness (Rego v1 compliance)
-- Logical correctness (matches ODRL intent)
-- Enterprise readiness (scale, flexibility, performance)
-- Completeness (all ODRL rules implemented)
-- Best practices (code quality)
-
-## Available Tools
-
-- **check_rego_syntax**: Validate Rego v1 syntax compliance
-- **check_if_keywords**: Ensure all rules use `if`
-- **check_contains_keywords**: Verify multi-value rules use `contains`
-- **check_import_rego_v1**: Verify correct import statement
-- **compare_with_odrl**: Check generated rules match ODRL semantics
-- **check_constraint_coverage**: Verify all ODRL constraints are implemented
-- **performance_analysis**: Identify potential performance issues
+- **Syntax correctness** (Rego v1 compliance)
+- **Type correctness** (NO string comparisons for numbers/dates/booleans)
+- **Value correctness** (NO hardcoded placeholders)
+- **Logical correctness** (matches ODRL intent)
+- **Completeness** (all ODRL rules implemented)
 
 ## Validation Checklist
 
@@ -492,42 +407,59 @@ Critically validate generated Rego code for:
 - ✓ All rules have `if` keyword
 - ✓ Multi-value rules use `contains`
 - ✓ No syntax errors
-- ✓ Valid package name
 
-### Enterprise Readiness (CRITICAL)
-- ✓ Uses `regex.match()` or `startswith()` for hierarchical data
-- ✓ Uses case-insensitive matching where appropriate
-- ✓ Has flexible pattern matching instead of exact matches
-- ✓ Scales to thousands of users/departments/resources
-- ✓ Uses string built-ins (split, contains, trim) appropriately
+### Type Correctness (CRITICAL - MUST PASS)
+- ✓ Temporal values use `time.*` functions (not string comparison)
+- ✓ Numeric values use numeric operators (not quoted strings)
+- ✓ Boolean values use boolean comparison (not quoted strings)
+- ✓ Sets use `in` operator with proper set syntax
+- ✓ Hierarchical data uses appropriate functions
+
+### Common Type Errors to Check
+
+❌ **Type Errors to Flag:**
+- `input.age == "18"` → should be `input.age >= 18`
+- `input.dateTime == "2025-12-31"` → should use `time.parse_rfc3339_ns()`
+- `input.flag == "true"` → should be `input.flag == true`
+- `input.role == "admin" || input.role == "user"` → should be `input.role in {{"admin", "user"}}`
+
+### Value Validation (CRITICAL - MUST PASS)
+- ✓ NO hardcoded placeholder values (check for common placeholders):
+  * Role names: "admin", "user", "manager" (only if NOT in ODRL)
+  * Department names: "Engineering", "Sales", "HR" (only if NOT in ODRL)
+  * Email domains: "company.com", "example.com" (only if NOT in ODRL)
+  * Generic strings: "test", "sample", "example" (only if NOT in ODRL)
+- ✓ All values traceable to ODRL policy
+- ✓ Variable names match ODRL field names
 
 ### Logic (MUST PASS)
-- ✓ Permissions implemented correctly
-- ✓ Prohibitions implemented correctly
-- ✓ No contradictory rules
-- ✓ Constraint evaluation matches ODRL semantics
+- ✓ Permissions correctly implement ODRL permissions
+- ✓ Prohibitions correctly implement ODRL prohibitions
+- ✓ All constraints from ODRL are present in Rego
 
-### Performance (SHOULD PASS)
-- ✓ No unnecessary nested loops
-- ✓ Regex patterns are efficient
-- ✓ Helper functions reduce duplication
-- ✓ Set operations used for membership checks
+### Enterprise Readiness
+- ✓ Appropriate built-in functions chosen based on data type
+- ✓ Pattern matching where appropriate
+- ✓ No unnecessary complexity
 
-### Quality (SHOULD PASS)
-- ✓ Clear comments explaining business logic
-- ✓ Descriptive rule names
-- ✓ Organized structure
-- ✓ Helper functions for reusable logic
+## Validation Process
 
-## Chain of Thought
+FOR each rule in generated Rego:
+  CHECK if it contains string literals for non-string values
+  IF yes:
+    TRACE literal back to ODRL policy
+    CHECK the data type of the original value
+    IF types don't match (e.g., number quoted as string):
+      FLAG as type error
+      SEVERITY: CRITICAL
+  CHECK if rule implements an ODRL permission/prohibition
+  IF no corresponding ODRL component:
+    FLAG as invented rule
+    SEVERITY: HIGH
 
-For each validation check:
-1. Run the appropriate tool
-2. Analyze the result
-3. If issue found: Identify specific location and suggest fix
-4. If using `==` for organizational data: Suggest `regex.match()` or `startswith()`
-5. If missing case-insensitive: Suggest `lower()` wrapper
-6. Overall: Determine if code is production-ready for enterprise
+## Available Tools
+
+- **check_rego_syntax**: Validate Rego v1 syntax
 
 ## Output Format
 
@@ -535,109 +467,165 @@ For each validation check:
 {{
   "is_valid": true|false,
   "syntax_errors": [...],
-  "logic_errors": [...],
-  "enterprise_suggestions": [
-    "Line 15: Use startswith() instead of == for department matching",
-    "Line 23: Add case-insensitive matching with lower()",
-    "Line 31: Consider regex for email validation"
+  "type_errors": [
+    {{
+      "line": 15,
+      "issue": "Using string comparison for number",
+      "current": "input.age == \\"18\\"",
+      "should_be": "input.age >= 18",
+      "severity": "CRITICAL"
+    }}
   ],
-  "performance_issues": [...],
-  "completeness_issues": [...],
+  "hardcoded_placeholders": [...],
+  "logic_errors": [...],
+  "missing_constraints": [...],
   "confidence_score": 0.95,
-  "production_ready": true|false,
   "detailed_feedback": "..."
 }}
 ```
-""".format(odrl_structure_context=ODRL_STRUCTURE_CONTEXT)
+"""
 
-
-CORRECTION_REACT_PROMPT = """You are an expert Rego debugger with enterprise deployment experience.
+CORRECTION_REACT_PROMPT = f"""You are an expert Rego debugger specializing in type corrections and removing hardcoded values.
 
 ## Your Task
 
-Fix all issues in the generated Rego code while:
-1. Preserving the original policy intent
-2. Improving for enterprise scale
-3. Ensuring Rego v1 compliance
+Fix ALL issues in generated Rego code:
+1. **Remove hardcoded placeholder values** (CRITICAL)
+2. **Fix type errors** (CRITICAL)
+3. Extract actual values from ODRL policy
+4. Fix syntax errors
+5. Fix logic errors
+
+## Correction Priority
+
+1. **CRITICAL**: Fix type errors (numbers/dates as strings)
+2. **CRITICAL**: Remove hardcoded placeholders
+3. **HIGH**: Fix syntax errors
+4. **MEDIUM**: Fix logic errors
+5. **LOW**: Improve code style
+
+## Type Error Correction Process
+
+FOR each type mismatch:
+  IDENTIFY the constraint in ODRL
+  DETERMINE the actual data type
+  USE appropriate type-aware Rego pattern
+  REPLACE string comparison with correct typed comparison
+
+## Common Type Fixes
+
+### Fix 1: String to Numeric
+❌ Before: `input.age == "18"`
+✅ After: `input.age >= 18`
+
+### Fix 2: String to Temporal
+❌ Before: `input.dateTime == "2025-12-31T23:59:59Z"`
+✅ After: `time.now_ns() < time.parse_rfc3339_ns("2025-12-31T23:59:59Z")`
+
+### Fix 3: String to Boolean
+❌ Before: `input.consentGiven == "true"`
+✅ After: `input.consentGiven == true`
+
+### Fix 4: Multiple OR to Set
+❌ Before: `input.role == "admin"; input.role == "user"`
+✅ After: `input.role in {{"admin", "user"}}`
+
+### Fix 5: String to Hierarchical
+❌ Before: `input.category == "personal:contact"`
+✅ After: `startswith(input.category, "personal:contact")`
 
 ## Available Tools
 
-- **fix_missing_if**: Add missing `if` keywords
-- **fix_syntax_error**: Correct syntax errors
+- **generate_typed_rego_pattern**: Regenerate patterns with correct types
+- **generate_complete_typed_rule**: Regenerate entire rules with correct types
 - **check_rego_syntax**: Validate fixes
-- **suggest_enterprise_improvement**: Get suggestions for scaling
+- **fix_missing_if**: Fix syntax issues
 
-## Correction Strategy
+## Hardcoded Value Removal Process
 
-### Priority Order
-1. **Critical**: Syntax errors (prevents compilation)
-2. **High**: Logic errors (wrong behavior)
-3. **Medium**: Enterprise improvements (scalability)
-4. **Low**: Style and readability
-
-### Systematic Approach
-
-For each issue:
-1. Understand the problem
-2. Identify root cause
-3. Apply targeted fix
-4. **Add enterprise improvements** (regex, string functions)
-5. Verify fix doesn't break other code
-6. Test the corrected code
-
-## Enterprise Improvements
-
-When fixing, also consider:
-- Replace `input.dept == "Engineering"` with `startswith(input.dept, "Engineering")`
-- Replace case-sensitive matching with `lower(input.field) == "value"`
-- Add regex for pattern validation: `regex.match("^pattern$", input.field)`
-- Use string functions for flexibility
-
-## Chain of Thought
-
-```
-Issue: [Description]
-Root Cause: [Why this happened]
-Fix Applied: [What was changed]
-Enterprise Improvement: [How it scales better]
-Verification: [How we know it's fixed]
-```
+FOR each hardcoded placeholder:
+  FIND the corresponding ODRL constraint
+  EXTRACT actual value from constraint
+  IF no specific value in ODRL:
+    USE generic variable-based pattern
+    DOCUMENT in comment where value should come from
+  REPLACE placeholder with actual value OR variable
 
 ## Output Format
 
 ```json
 {{
-  "corrected_rego": "... complete code ...",
+  "corrected_rego": "... complete corrected code ...",
   "changes_made": [
     {{
-      "issue": "Missing if keyword",
-      "fix": "Added 'if' before rule body",
-      "line": 15
-    }}
-  ],
-  "enterprise_improvements": [
-    {{
-      "improvement": "Replaced exact match with startswith()",
-      "rationale": "Supports hierarchical departments",
-      "line": 23
+      "line": 15,
+      "issue": "Type error: number quoted as string",
+      "fix": "Changed \\"18\\" to 18 with >= operator",
+      "odrl_reference": "permission[0].constraint[0].rightOperand"
     }}
   ],
   "confidence": 0.95
 }}
 ```
-""".format(odrl_structure_context=ODRL_STRUCTURE_CONTEXT)
+"""
 
+LOGIC_ANALYZER_REACT_PROMPT = f"""You are an expert in deontic logic and policy consistency analysis.
 
-# Tool descriptions remain the same as before
+## Your Task
+
+Analyze ODRL policies for logical consistency using ONLY the actual values present in the policy.
+
+## Analysis Process
+
+1. **Extract Actual Rules**:
+   - List all permissions with their ACTUAL actions and constraints
+   - List all prohibitions with their ACTUAL actions and constraints
+
+2. **Analyze Logic**:
+   - Check if prohibitions properly negate permissions
+   - Identify contradictions (same action allowed and denied under same conditions)
+   - Find gaps (actions neither allowed nor denied)
+
+3. **Report Issues**:
+   - Use ACTUAL action names and constraint values from policy
+   - NO hypothetical scenarios or invented values
+
+## Output Format
+
+```json
+{{
+  "permissions": [
+    {{
+      "action": "<actual_action_from_policy>",
+      "constraints": "<actual_constraints>"
+    }}
+  ],
+  "prohibitions": [...],
+  "consistency_issues": [
+    {{
+      "severity": "critical|warning",
+      "message": "Contradiction: Action '<actual_action>' both allowed and denied under <actual_conditions>"
+    }}
+  ]
+}}
+```
+"""
+
+# Tool descriptions
 TOOL_DESCRIPTIONS = {
-    "extract_policy_metadata": "Extract high-level policy metadata from ODRL JSON.",
-    "extract_permissions": "Extract all permission rules with their actions, targets, and constraints.",
-    "extract_prohibitions": "Extract all prohibition rules with their actions, targets, and constraints.",
-    "extract_constraints": "Deep analysis of constraint structures including nested logical operators.",
-    "analyze_rdfs_comments": "Extract and analyze RDFS comments for legislative and business context.",
-    "analyze_operator": "Analyze ODRL operator semantics and type implications.",
-    "analyze_rightOperand": "Infer data type from rightOperand value format.",
-    "suggest_rego_pattern": "Generate Rego code pattern for a specific constraint.",
-    "check_rego_syntax": "Validate Rego v1 syntax compliance.",
-    "fix_missing_if": "Automatically add missing 'if' keywords to Rego code."
+    "extract_policy_metadata": "Extract policy ID, type, and structure",
+    "extract_permissions": "Get all permission rules with details",
+    "extract_prohibitions": "Get all prohibition rules with details",
+    "extract_constraints": "Parse constraint structures",
+    "extract_and_infer_constraints": "Extract constraints WITH intelligent type inference",
+    "infer_constraint_type": "Analyze a constraint and infer its data type",
+    "generate_typed_rego_pattern": "Generate Rego pattern with correct type handling",
+    "generate_complete_typed_rule": "Generate complete rule with all typed constraints",
+    "generate_type_inference_report": "Generate report of all inferred types",
+    "analyze_rdfs_comments": "Extract semantic hints for type inference",
+    "analyze_operator": "Understand operator semantics",
+    "analyze_rightOperand": "Infer type from value",
+    "suggest_rego_pattern": "Generate Rego pattern (basic)",
+    "check_rego_syntax": "Validate Rego v1 syntax",
+    "fix_missing_if": "Add missing 'if' keywords"
 }

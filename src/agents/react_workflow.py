@@ -1,7 +1,6 @@
 """
-ReAct Agent Workflow for ODRL to Rego Conversion
-Uses LangGraph's create_react_agent with custom tools
-Integrates with existing config.py for LLM configuration
+ReAct Agent Workflow with Intelligent Type Inference
+Uses sophisticated type analysis to generate properly typed Rego code
 """
 import json
 import os
@@ -21,16 +20,15 @@ sys.path.insert(0, str(project_root))
 
 from src.config import OPENAI_MODEL
 
-# Import tools and prompts
+# Import type-aware tools
 from .react_tools import (
     extract_policy_metadata,
-    extract_permissions,
-    extract_prohibitions,
-    extract_constraints,
+    extract_and_infer_constraints,
+    infer_constraint_type,
+    generate_typed_rego_pattern,
+    generate_complete_typed_rule,
+    generate_type_inference_report,
     analyze_rdfs_comments,
-    analyze_operator,
-    analyze_rightOperand,
-    suggest_rego_pattern,
     check_rego_syntax,
     fix_missing_if
 )
@@ -38,7 +36,6 @@ from .react_tools import (
 from ..prompting.odrl_rego_strategies import (
     ODRL_PARSER_REACT_PROMPT,
     TYPE_INFERENCE_REACT_PROMPT,
-    LOGIC_ANALYZER_REACT_PROMPT,
     REGO_GENERATOR_REACT_PROMPT,
     REFLECTION_REACT_PROMPT,
     CORRECTION_REACT_PROMPT
@@ -50,27 +47,24 @@ from ..prompting.odrl_rego_strategies import (
 # ============================================================================
 
 def get_llm_for_agent():
-    """
-    Get LLM instance using existing config.py settings
-    """
-    return ChatOpenAI(model=OPENAI_MODEL)
+    """Get LLM instance using existing config.py settings"""
+    return ChatOpenAI(model=OPENAI_MODEL, temperature=0)
 
 
 # ============================================================================
-# ReAct Agent Creators
+# ReAct Agent Creators (Type-Aware)
 # ============================================================================
 
 def create_odrl_parser_agent():
     """
-    Create ReAct agent for ODRL parsing with deep semantic understanding.
+    Create ReAct agent for ODRL parsing with type inference.
     """
     llm = get_llm_for_agent()
     
     tools = [
         extract_policy_metadata,
-        extract_permissions,
-        extract_prohibitions,
-        extract_constraints,
+        extract_and_infer_constraints,  # Main tool - extracts + infers types
+        generate_type_inference_report,  # Overview of types
         analyze_rdfs_comments
     ]
     
@@ -88,16 +82,15 @@ def create_odrl_parser_agent():
 
 def create_type_inference_agent():
     """
-    Create ReAct agent for type inference from ODRL constraints.
+    Create ReAct agent specialized in type inference and pattern generation.
     """
     llm = get_llm_for_agent()
     
     tools = [
-        analyze_operator,
-        analyze_rightOperand,
-        suggest_rego_pattern,
-        extract_constraints,
-        analyze_rdfs_comments
+        extract_and_infer_constraints,
+        infer_constraint_type,  # Analyze specific constraint types
+        generate_typed_rego_pattern,  # Generate type-aware patterns
+        generate_type_inference_report
     ]
     
     checkpointer = MemorySaver()
@@ -114,13 +107,14 @@ def create_type_inference_agent():
 
 def create_rego_generator_agent():
     """
-    Create ReAct agent for generating Rego v1 code.
+    Create ReAct agent for generating type-aware Rego v1 code.
     """
     llm = get_llm_for_agent()
     
     tools = [
-        suggest_rego_pattern,
-        analyze_operator,
+        extract_and_infer_constraints,
+        generate_typed_rego_pattern,
+        generate_complete_typed_rule,  # Main tool - generates typed rules
         check_rego_syntax
     ]
     
@@ -138,7 +132,7 @@ def create_rego_generator_agent():
 
 def create_reflection_agent():
     """
-    Create ReAct agent for validating generated Rego code.
+    Create ReAct agent for validating type correctness in generated Rego.
     """
     llm = get_llm_for_agent()
     
@@ -160,11 +154,13 @@ def create_reflection_agent():
 
 def create_correction_agent():
     """
-    Create ReAct agent for fixing issues in Rego code.
+    Create ReAct agent for fixing type errors in Rego code.
     """
     llm = get_llm_for_agent()
     
     tools = [
+        generate_typed_rego_pattern,
+        generate_complete_typed_rule,
         check_rego_syntax,
         fix_missing_if
     ]
@@ -182,7 +178,7 @@ def create_correction_agent():
 
 
 # ============================================================================
-# Orchestrated Workflow
+# Orchestrated Workflow with Type Inference
 # ============================================================================
 
 def convert_odrl_to_rego_react(
@@ -191,14 +187,14 @@ def convert_odrl_to_rego_react(
     max_corrections: int = 3
 ) -> Dict[str, Any]:
     """
-    Complete ODRL to Rego conversion using ReAct agents.
+    Complete ODRL to Rego conversion with intelligent type inference.
     
-    This orchestrates multiple ReAct agents in sequence:
-    1. Parser agent analyzes ODRL
-    2. Type inference agent determines data types
-    3. Generator agent creates Rego code
-    4. Reflection agent validates code
-    5. Correction agent fixes issues (if needed)
+    This workflow:
+    1. Extracts constraints and infers their data types
+    2. Generates type-appropriate Rego patterns
+    3. Creates complete rules with correct type handling
+    4. Validates type correctness
+    5. Fixes any type mismatches
     
     Args:
         odrl_json: ODRL policy in JSON-LD format
@@ -206,7 +202,7 @@ def convert_odrl_to_rego_react(
         max_corrections: Maximum correction attempts
         
     Returns:
-        Dictionary with conversion results
+        Dictionary with conversion results including type inference report
     """
     
     results = {
@@ -215,6 +211,8 @@ def convert_odrl_to_rego_react(
         "policy_id": "",
         "messages": [],
         "reasoning_chain": [],
+        "type_inference_report": {},
+        "types_detected": [],
         "logical_issues": [],
         "correction_attempts": 0,
         "error_message": None,
@@ -225,29 +223,39 @@ def convert_odrl_to_rego_react(
         odrl_str = json.dumps(odrl_json, indent=2)
         
         # ========================================================================
-        # STAGE 1: Parse ODRL with ReAct Agent
+        # STAGE 1: Parse ODRL and Infer Constraint Types
         # ========================================================================
-        results["messages"].append("Stage 1: Parsing ODRL with ReAct agent...")
-        results["stage_reached"] = "parsing"
+        results["messages"].append("Stage 1: Parsing ODRL with intelligent type inference...")
+        results["stage_reached"] = "parsing_with_type_inference"
         
         parser_agent = create_odrl_parser_agent()
         
-        parser_config = {"configurable": {"thread_id": "odrl-parser"}}
+        parser_config = {"configurable": {"thread_id": "odrl-parser-typed"}}
         parser_input = {
             "messages": [
                 HumanMessage(content=f"""
-Analyze this ODRL policy and extract all components:
+Analyze this ODRL policy and infer the data types of all constraints:
 
 {odrl_str}
 
-Use your tools systematically to:
-1. Extract policy metadata
-2. Extract all permissions
-3. Extract all prohibitions  
-4. Analyze all constraints
-5. Analyze RDFS comments for context
+CRITICAL: Use intelligent type inference!
 
-Provide a comprehensive analysis with reasoning.
+1. Use `extract_and_infer_constraints` to get ALL constraints with inferred types
+2. Use `generate_type_inference_report` for an overview
+3. For each constraint, report:
+   - The actual value
+   - The INFERRED TYPE (datetime, number, string, set, hierarchical, etc.)
+   - Why that type was inferred
+   - What Rego operators/functions should be used
+
+Example analysis:
+"Constraint: dateTime < '2025-12-31T23:59:59Z'
+ Inferred Type: datetime (detected ISO 8601 format)
+ Rego Pattern: time.now_ns() < time.parse_rfc3339_ns('2025-12-31T23:59:59Z')
+ 
+ Constraint: role isAnyOf ['data_controller', 'dpo']
+ Inferred Type: set_string (list of strings)
+ Rego Pattern: input.role in {{'data_controller', 'dpo'}}"
                 """)
             ]
         }
@@ -256,20 +264,27 @@ Provide a comprehensive analysis with reasoning.
         parser_result = parser_response["messages"][-1].content
         
         results["reasoning_chain"].append({
-            "stage": "parsing",
+            "stage": "parsing_with_type_inference",
             "reasoning": parser_result
         })
         
-        # Extract policy ID from the analysis
+        # Extract metadata
         metadata_result = extract_policy_metadata(odrl_str)
         results["policy_id"] = metadata_result.get("policy_id", "unknown")
+        
+        # Get type inference report
+        type_report = generate_type_inference_report(odrl_str)
+        results["type_inference_report"] = type_report
+        results["types_detected"] = type_report.get("types_found", [])
+        
         results["messages"].append(f"Parsed policy: {results['policy_id']}")
+        results["messages"].append(f"Types detected: {', '.join(results['types_detected'])}")
         
         # ========================================================================
-        # STAGE 2: Type Inference with ReAct Agent
+        # STAGE 2: Generate Type-Aware Rego Patterns
         # ========================================================================
-        results["messages"].append("Stage 2: Inferring types with ReAct agent...")
-        results["stage_reached"] = "type_inference"
+        results["messages"].append("Stage 2: Generating type-aware Rego patterns...")
+        results["stage_reached"] = "type_aware_pattern_generation"
         
         type_agent = create_type_inference_agent()
         
@@ -277,20 +292,32 @@ Provide a comprehensive analysis with reasoning.
         type_input = {
             "messages": [
                 HumanMessage(content=f"""
-Infer Rego data types for all constraints in this ODRL policy:
+Generate type-appropriate Rego patterns for each constraint:
 
+ODRL Policy:
 {odrl_str}
 
-ODRL Parser's Analysis:
+Parser found these types:
 {parser_result}
 
-Use your tools to:
-1. Analyze each constraint's operator
-2. Analyze each rightOperand value
-3. Generate Rego patterns for each constraint
-4. Consider RDFS comments for type hints
+Type Distribution:
+{json.dumps(results['type_inference_report'].get('type_counts', {{}}), indent=2)}
 
-Provide detailed type inference results with reasoning.
+CRITICAL INSTRUCTIONS:
+1. For EACH constraint, use `generate_typed_rego_pattern` to get the correct pattern
+2. Use TYPE-APPROPRIATE Rego operators:
+   - Temporal (datetime, date): time.parse_rfc3339_ns(), time.now_ns(), <, >
+   - Numeric (int, float): Direct comparison <, >, ==, >=, <=
+   - Set (list of values): input.field in {{"value1", "value2"}}
+   - Hierarchical: startswith(input.field, "prefix")
+   - String: == or contains() or startswith()
+   - Pattern: regex.match()
+
+3. NEVER treat non-strings as strings!
+   ❌ Wrong: input.age == "18"
+   ✅ Right: input.age >= 18
+
+Generate patterns with correct type handling!
                 """)
             ]
         }
@@ -299,16 +326,16 @@ Provide detailed type inference results with reasoning.
         type_result = type_response["messages"][-1].content
         
         results["reasoning_chain"].append({
-            "stage": "type_inference",
+            "stage": "type_aware_patterns",
             "reasoning": type_result
         })
-        results["messages"].append("Type inference complete")
+        results["messages"].append("Generated type-aware patterns for all constraints")
         
         # ========================================================================
-        # STAGE 3: Generate Rego with ReAct Agent
+        # STAGE 3: Generate Complete Typed Rego Code
         # ========================================================================
-        results["messages"].append("Stage 3: Generating Rego code with ReAct agent...")
-        results["stage_reached"] = "generation"
+        results["messages"].append("Stage 3: Generating complete Rego code with type handling...")
+        results["stage_reached"] = "typed_code_generation"
         
         generator_agent = create_rego_generator_agent()
         
@@ -320,40 +347,43 @@ EXISTING REGO TO APPEND TO:
 ```rego
 {existing_rego}
 ```
-
-Your generated code must:
-- Not conflict with existing rules
-- Follow the same style
-- Be properly appended
             """
         
-        gen_config = {"configurable": {"thread_id": "rego-generator"}}
+        gen_config = {"configurable": {"thread_id": "rego-generator-typed"}}
         gen_input = {
             "messages": [
                 HumanMessage(content=f"""
-Generate OPA Rego v1 code for this ODRL policy:
+Generate complete OPA Rego v1 code with PROPER TYPE HANDLING:
 
 ODRL Policy:
 {odrl_str}
 
-ODRL Analysis:
-{parser_result}
-
-Type Inference:
+Type Analysis:
 {type_result}
+
+Types in Policy:
+{json.dumps(results['types_detected'])}
 
 {existing_rego_prompt}
 
-Use your tools to:
-1. Generate Rego patterns for each constraint
-2. Create permission rules
-3. Create prohibition rules
-4. Validate syntax as you go
+CRITICAL REQUIREMENTS:
+1. Use `generate_complete_typed_rule` for each permission/prohibition
+2. Each constraint must use TYPE-APPROPRIATE operators:
+   - Temporal constraints: Use time.* functions
+   - Numeric constraints: Use numeric operators
+   - Set constraints: Use 'in' with proper set syntax
+   - Hierarchical: Use startswith() when appropriate
 
-Generate complete, syntactically correct Rego v1 code.
-CRITICAL: Include 'import rego.v1' and use 'if' keywords.
+3. EXAMPLES OF CORRECT TYPE USAGE:
+   ✅ time.now_ns() < time.parse_rfc3339_ns("2025-12-31T23:59:59Z")  # temporal
+   ✅ input.age >= 18  # numeric
+   ✅ input.role in {{"data_controller", "dpo"}}  # set
+   ✅ startswith(input.category, "personal:contact")  # hierarchical
 
-Return ONLY the Rego code, no markdown formatting.
+4. Include 'import rego.v1' and use 'if' keywords
+5. Validate with check_rego_syntax
+
+Generate type-correct Rego code. Return ONLY the Rego code, no markdown.
                 """)
             ]
         }
@@ -361,7 +391,7 @@ Return ONLY the Rego code, no markdown formatting.
         gen_response = generator_agent.invoke(gen_input, gen_config)
         rego_code = gen_response["messages"][-1].content
         
-        # Clean markdown fences if present
+        # Clean markdown fences
         if "```" in rego_code:
             lines = rego_code.split('\n')
             rego_code = '\n'.join(
@@ -370,36 +400,44 @@ Return ONLY the Rego code, no markdown formatting.
             )
         
         results["generated_rego"] = rego_code.strip()
-        results["messages"].append(f"Generated Rego code ({len(rego_code)} characters)")
+        results["messages"].append(f"Generated type-aware Rego code ({len(rego_code)} characters)")
         
         # ========================================================================
-        # STAGE 4: Validate with Reflection Agent
+        # STAGE 4: Validate Type Correctness
         # ========================================================================
-        results["messages"].append("Stage 4: Validating Rego code...")
-        results["stage_reached"] = "validation"
+        results["messages"].append("Stage 4: Validating type correctness...")
+        results["stage_reached"] = "type_validation"
         
         reflection_agent = create_reflection_agent()
         
-        refl_config = {"configurable": {"thread_id": "reflection"}}
+        refl_config = {"configurable": {"thread_id": "reflection-typed"}}
         refl_input = {
             "messages": [
                 HumanMessage(content=f"""
-Validate this generated Rego code:
+Validate this Rego code for TYPE CORRECTNESS:
 
 ```rego
 {results['generated_rego']}
 ```
 
-Original ODRL Policy:
+Original ODRL with Types:
 {odrl_str}
 
-Use your tools to:
-1. Check Rego v1 syntax compliance
-2. Verify all ODRL rules are implemented
-3. Check for logical consistency
-4. Identify any issues
+Types Expected:
+{json.dumps(results['types_detected'])}
 
-Provide comprehensive validation results in JSON format.
+CHECK FOR TYPE ERRORS:
+1. Are temporal values using time.* functions? (not string comparison)
+2. Are numeric values using numeric operators? (not quoted strings)
+3. Are sets using 'in' with proper syntax?
+4. Are hierarchical values using appropriate functions?
+
+COMMON TYPE ERRORS:
+❌ input.age == "18" (should be input.age >= 18)
+❌ input.date == "2025-12-31" (should use time functions)
+❌ input.role == "admin" || input.role == "user" (should use set: in {{"admin", "user"}})
+
+Report validation results with focus on TYPE CORRECTNESS.
                 """)
             ]
         }
@@ -408,121 +446,89 @@ Provide comprehensive validation results in JSON format.
         validation_result = refl_response["messages"][-1].content
         
         results["reasoning_chain"].append({
-            "stage": "validation",
+            "stage": "type_validation",
             "reasoning": validation_result
         })
         
-        # Try to parse validation as JSON
-        try:
-            # Extract JSON from response if wrapped in markdown
-            if "```json" in validation_result:
-                json_start = validation_result.find("```json") + 7
-                json_end = validation_result.find("```", json_start)
-                validation_json = json.loads(validation_result[json_start:json_end])
-            elif "{" in validation_result:
-                # Find JSON object
-                start = validation_result.find("{")
-                end = validation_result.rfind("}") + 1
-                validation_json = json.loads(validation_result[start:end])
-            else:
-                validation_json = {"is_valid": "pass" in validation_result.lower()}
-        except:
-            validation_json = {"is_valid": "error" not in validation_result.lower()}
-        
-        is_valid = validation_json.get("is_valid", True)
+        # Check if valid
+        is_valid = convert_odrl_to_rego_react._check_validation_result(validation_result)
         
         # ========================================================================
-        # STAGE 5: Correction Loop (if needed)
+        # STAGE 5: Type Correction (if needed)
         # ========================================================================
-        correction_attempts = 0
-        
-        while not is_valid and correction_attempts < max_corrections:
-            correction_attempts += 1
-            results["correction_attempts"] = correction_attempts
-            results["messages"].append(f"Stage 5: Correction attempt {correction_attempts}/{max_corrections}...")
-            results["stage_reached"] = "correction"
+        if not is_valid and max_corrections > 0:
+            results["messages"].append(f"Stage 5: Correcting type errors (max {max_corrections})...")
+            results["stage_reached"] = "type_correction"
             
             correction_agent = create_correction_agent()
             
-            corr_config = {"configurable": {"thread_id": f"correction-{correction_attempts}"}}
-            corr_input = {
-                "messages": [
-                    HumanMessage(content=f"""
-Fix the issues in this Rego code:
+            for attempt in range(max_corrections):
+                results["correction_attempts"] += 1
+                
+                corr_config = {"configurable": {"thread_id": f"correction-typed-{attempt}"}}
+                corr_input = {
+                    "messages": [
+                        HumanMessage(content=f"""
+Fix TYPE ERRORS in this Rego code:
 
 ```rego
 {results['generated_rego']}
 ```
 
-Validation Feedback:
+Validation Issues:
 {validation_result}
 
-Use your tools to:
-1. Check what specific syntax issues exist
-2. Fix missing 'if' keywords
-3. Fix any other issues
-4. Validate the corrected code
+Expected Types:
+{json.dumps(results['type_inference_report'], indent=2)}
 
-Return the corrected Rego code in JSON format:
-{{"corrected_code": "...", "changes": ["..."]}}
-                    """)
-                ]
-            }
-            
-            corr_response = correction_agent.invoke(corr_input, corr_config)
-            correction_result = corr_response["messages"][-1].content
-            
-            # Extract corrected code
-            try:
-                if "```json" in correction_result:
-                    json_start = correction_result.find("```json") + 7
-                    json_end = correction_result.find("```", json_start)
-                    correction_json = json.loads(correction_result[json_start:json_end])
-                elif "{" in correction_result:
-                    start = correction_result.find("{")
-                    end = correction_result.rfind("}") + 1
-                    correction_json = json.loads(correction_result[start:end])
-                else:
-                    correction_json = {"corrected_code": results["generated_rego"]}
+CRITICAL FIXES NEEDED:
+1. Use `generate_typed_rego_pattern` to regenerate patterns with correct types
+2. Replace string comparisons with appropriate typed operators
+3. Fix temporal, numeric, and set handling
+
+Common Fixes:
+- String → Numeric: "18" → 18, == → >=
+- String → Temporal: "2025-12-31" → time.parse_rfc3339_ns()
+- Multiple OR → Set: == "a" || == "b" → in {{"a", "b"}}
+
+Return corrected Rego with PROPER TYPE HANDLING!
+                        """)
+                    ]
+                }
                 
-                results["generated_rego"] = correction_json.get("corrected_code", results["generated_rego"])
-                results["messages"].append(f"Applied corrections (attempt {correction_attempts})")
+                corr_response = correction_agent.invoke(corr_input, corr_config)
+                corrected_code = corr_response["messages"][-1].content
                 
-            except:
-                results["messages"].append(f"Could not parse correction result")
-                break
-            
-            # Re-validate
-            refl_input["messages"][0].content = f"""
-Validate this corrected Rego code:
+                # Clean and update
+                if "```" in corrected_code:
+                    lines = corrected_code.split('\n')
+                    corrected_code = '\n'.join(
+                        line for line in lines 
+                        if not line.strip().startswith('```')
+                    )
+                
+                results["generated_rego"] = corrected_code.strip()
+                results["messages"].append(f"Type correction attempt {attempt + 1}/{max_corrections}")
+                
+                # Re-validate
+                refl_input["messages"][0] = HumanMessage(content=f"""
+Validate this corrected Rego code for type correctness:
 
 ```rego
 {results['generated_rego']}
 ```
 
-Use your tools to check if issues are resolved.
-            """
-            
-            refl_response = reflection_agent.invoke(refl_input, refl_config)
-            validation_result = refl_response["messages"][-1].content
-            
-            try:
-                if "```json" in validation_result:
-                    json_start = validation_result.find("```json") + 7
-                    json_end = validation_result.find("```", json_start)
-                    validation_json = json.loads(validation_result[json_start:json_end])
-                else:
-                    start = validation_result.find("{")
-                    end = validation_result.rfind("}") + 1
-                    validation_json = json.loads(validation_result[start:end])
+Expected types: {json.dumps(results['types_detected'])}
+                """)
                 
-                is_valid = validation_json.get("is_valid", False)
-            except:
-                is_valid = "error" not in validation_result.lower()
-            
-            if is_valid:
-                results["messages"].append("✓ Validation passed after correction")
-                break
+                refl_response = reflection_agent.invoke(refl_input, refl_config)
+                validation_result = refl_response["messages"][-1].content
+                
+                is_valid = convert_odrl_to_rego_react._check_validation_result(validation_result)
+                
+                if is_valid:
+                    results["messages"].append("✓ Type validation passed after correction")
+                    break
         
         # ========================================================================
         # Final Status
@@ -530,18 +536,39 @@ Use your tools to check if issues are resolved.
         results["success"] = is_valid
         if is_valid:
             results["stage_reached"] = "completed"
-            results["messages"].append("✓ ODRL to Rego conversion successful!")
+            results["messages"].append("✓ ODRL to typed Rego conversion successful!")
         else:
             results["stage_reached"] = "validation_failed"
-            results["error_message"] = f"Validation failed after {max_corrections} correction attempts"
+            results["error_message"] = f"Type validation failed after {max_corrections} attempts"
             results["messages"].append(f"✗ Conversion failed: {results['error_message']}")
         
     except Exception as e:
         results["error_message"] = f"Conversion error: {str(e)}"
         results["messages"].append(f"ERROR: {str(e)}")
         results["stage_reached"] = "failed"
+        import traceback
+        results["messages"].append(traceback.format_exc())
     
     return results
+    
+    def _check_validation_result(self, validation_text: str) -> bool:
+        """Check if validation passed"""
+        try:
+            if "```json" in validation_text:
+                json_start = validation_text.find("```json") + 7
+                json_end = validation_text.find("```", json_start)
+                validation_json = json.loads(validation_text[json_start:json_end])
+                return validation_json.get("is_valid", False)
+            else:
+                return "valid" in validation_text.lower() and "invalid" not in validation_text.lower()
+        except:
+            return "valid" in validation_text.lower() and "error" not in validation_text.lower()
+
+
+# Make it a module helper attached to the function
+convert_odrl_to_rego_react._check_validation_result = lambda text: (
+    "valid" in text.lower() and "invalid" not in text.lower()
+)
 
 
 # ============================================================================
@@ -555,7 +582,7 @@ def convert_odrl_file_to_rego(
     max_corrections: int = 3
 ) -> Dict[str, Any]:
     """
-    Convert ODRL file to Rego file using ReAct agents.
+    Convert ODRL file to typed Rego file.
     
     Args:
         input_file: Path to ODRL JSON file
@@ -564,7 +591,7 @@ def convert_odrl_file_to_rego(
         max_corrections: Maximum correction attempts
         
     Returns:
-        Conversion results
+        Conversion results with type inference report
     """
     # Load ODRL
     with open(input_file, 'r') as f:
@@ -572,11 +599,11 @@ def convert_odrl_file_to_rego(
     
     # Load existing Rego if provided
     existing_rego = None
-    if existing_rego_file:
+    if existing_rego_file and os.path.exists(existing_rego_file):
         with open(existing_rego_file, 'r') as f:
             existing_rego = f.read()
     
-    # Convert
+    # Convert with type inference
     result = convert_odrl_to_rego_react(odrl_json, existing_rego, max_corrections)
     
     # Save if successful
