@@ -451,7 +451,7 @@ Report validation results with focus on TYPE CORRECTNESS.
         })
         
         # Check if valid
-        is_valid = convert_odrl_to_rego_react._check_validation_result(validation_result)
+        is_valid = _check_validation_result(validation_result)
         
         # ========================================================================
         # STAGE 5: Type Correction (if needed)
@@ -524,7 +524,7 @@ Expected types: {json.dumps(results['types_detected'])}
                 refl_response = reflection_agent.invoke(refl_input, refl_config)
                 validation_result = refl_response["messages"][-1].content
                 
-                is_valid = convert_odrl_to_rego_react._check_validation_result(validation_result)
+                is_valid = _check_validation_result(validation_result)
                 
                 if is_valid:
                     results["messages"].append("✓ Type validation passed after correction")
@@ -551,7 +551,7 @@ Expected types: {json.dumps(results['types_detected'])}
     
     return results
     
-    def _check_validation_result(self, validation_text: str) -> bool:
+    def _check_validation_result(validation_text: str) -> bool:
         """Check if validation passed"""
         try:
             if "```json" in validation_text:
@@ -565,10 +565,9 @@ Expected types: {json.dumps(results['types_detected'])}
             return "valid" in validation_text.lower() and "error" not in validation_text.lower()
 
 
-# Make it a module helper attached to the function
-convert_odrl_to_rego_react._check_validation_result = lambda text: (
-    "valid" in text.lower() and "invalid" not in text.lower()
-)
+# Helper function for validation
+def _check_validation_result(text: str) -> bool:
+    return "valid" in text.lower() and "invalid" not in text.lower()
 
 
 # ============================================================================
