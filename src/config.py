@@ -56,14 +56,12 @@ def get_openai_client() -> OpenAI:
         ValueError: If OPENAI_API_KEY is not set
     """
     if not Config.API_KEY:
-        raise ValueError("OPENAI_API_KEY environment variable is required")
+        raise ValueError(
+            "OPENAI_API_KEY environment variable is required. "
+            "Please set it using: export OPENAI_API_KEY='your-api-key'"
+        )
     
     return OpenAI(
         api_key=Config.API_KEY,
         base_url=Config.BASE_URL
     )
-
-
-# Validate API key on module import
-if not Config.API_KEY:
-    raise ValueError("OPENAI_API_KEY environment variable is required")

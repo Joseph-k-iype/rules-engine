@@ -788,22 +788,400 @@ def _generate_constraint_condition(constraint: Dict[str, Any]) -> Optional[str]:
     elif inferred_type == "boolean":
         return f'{input_ref} {rego_op} {str(right_op).lower()}'
     elif inferred_type == "array":
-        values = ', '.join([f'"{v}"' if isinstance(v, str) else str(v) for v in right_op])
-        return f'{input_ref} {rego_op} {{{values}}}'
+        # Build formatted values first to avoid backslash in f-string
+        formatted_items = []
+        for v in right_op:
+            if isinstance(v, str):
+                formatted_items.append(f'"{v}"')
+            else:
+                formatted_items.append(str(v))
+        items_str = ', '.join(formatted_items)
+        return f'{input_ref} {rego_op} {{{items_str}}}'
     else:
         return f'{input_ref} {rego_op} "{right_op}"'
 
 
-# Re-export original tools for backward compatibility
-from .react_tools import (
-    extract_policy_metadata,
-    extract_permissions,
-    extract_prohibitions,
-    extract_constraints,
-    analyze_rdfs_comments,
-    analyze_operator,
-    analyze_rightOperand,
-    suggest_rego_pattern,
-    check_rego_syntax,
-    fix_missing_if
-)
+# ============================================================================
+# Original Tools (Implemented Directly - No Circular Import)
+# ============================================================================
+
+@tool
+def extract_policy_metadata(odrl_json: str) -> Dict[str, Any]:
+    """
+    Extract basic metadata from ODRL policy.
+    
+    Args:
+        odrl_json: JSON string of ODRL policy
+        
+    Returns:
+        Policy metadata
+    """
+    try:
+        policy = json.loads(odrl_json) if isinstance(odrl_json, str) else odrl_json
+        
+        return {
+            "policy_id": policy.get("@id", "unknown"),
+            "policy_type": policy.get("@type", "unknown"),
+            "permission_count": len(policy.get("permission", [])),
+            "prohibition_count": len(policy.get("prohibition", [])),
+            "obligation_count": len(policy.get("obligation", [])),
+            "profile": policy.get("profile")
+        }
+    except Exception as e:
+        return {"error": f"Failed to extract metadata: {str(e)}"}
+
+
+@tool
+def extract_permissions(odrl_json: str) -> Dict[str, Any]:
+    """
+    Extract all permission rules from ODRL policy.
+    
+    Args:
+        odrl_json: JSON string of ODRL policy
+        
+    Returns:
+        All permissions with details
+    """
+    try:
+        policy = json.loads(odrl_json) if isinstance(odrl_json, str) else odrl_json
+        
+        permissions = []
+        for perm in policy.get("permission", []):
+            permissions.append({
+                "id": perm.get("@id"),
+                "action": perm.get("action"),
+                "target": perm.get("target"),
+                "assignee": perm.get("assignee"),
+                "constraint_count": len(perm.get("constraint", []))
+            })
+        
+        return {
+            "permissions": permissions,
+            "total": len(permissions)
+        }
+    except Exception as e:
+        return {"error": f"Failed to extract permissions: {str(e)}"}
+
+
+@tool
+def extract_prohibitions(odrl_json: str) -> Dict[str, Any]:
+    """
+    Extract all prohibition rules from ODRL policy.
+    
+    Args:
+        odrl_json: JSON string of ODRL policy
+        
+    Returns:
+        All prohibitions with details
+    """
+    try:
+        policy = json.loads(odrl_json) if isinstance(odrl_json, str) else odrl_json
+        
+        prohibitions = []
+        for prohib in policy.get("prohibition", []):
+            prohibitions.append({
+                "id": prohib.get("@id"),
+                "action": prohib.get("action"),
+                "target": prohib.get("target"),
+                "constraint_count": len(prohib.get("constraint", []))
+            })
+        
+        return {
+            "prohibitions": prohibitions,
+            "total": len(prohibitions)
+        }
+    except Exception as e:
+        return {"error": f"Failed to extract prohibitions: {str(e)}"}
+
+
+@tool
+def extract_constraints(odrl_json: str) -> Dict[str, Any]:
+    """
+    Extract all constraints from ODRL policy.
+    
+    Args:
+        odrl_json: JSON string of ODRL policy
+        
+    Returns:
+        All constraints
+    """
+    try:
+        policy = json.loads(odrl_json) if isinstance(odrl_json, str) else odrl_json
+        
+        all_constraints = []
+        
+        # From permissions
+        for perm in policy.get("permission", []):
+            for constraint in perm.get("constraint", []):
+                all_constraints.append({
+                    "source": "permission",
+                    "leftOperand": constraint.get("leftOperand"),
+                    "operator": constraint.get("operator"),
+                    "rightOperand": constraint.get("rightOperand")
+                })
+        
+        # From prohibitions
+        for prohib in policy.get("prohibition", []):
+            for constraint in prohib.get("constraint", []):
+                all_constraints.append({
+                    "source": "prohibition",
+                    "leftOperand": constraint.get("leftOperand"),
+                    "operator": constraint.get("operator"),
+                    "rightOperand": constraint.get("rightOperand")
+                })
+        
+        return {
+            "constraints": all_constraints,
+            "total": len(all_constraints)
+        }
+    except Exception as e:
+        return {"error": f"Failed to extract constraints: {str(e)}"}
+
+
+@tool
+def analyze_rdfs_comments(odrl_json: str) -> Dict[str, Any]:
+    """
+    Extract rdfs:comment annotations for semantic context.
+    
+    Args:
+        odrl_json: JSON string of ODRL policy
+        
+    Returns:
+        All rdfs:comment values
+    """
+    try:
+        policy = json.loads(odrl_json) if isinstance(odrl_json, str) else odrl_json
+        
+        comments = {}
+        
+        def extract_comments(obj, path=""):
+            if isinstance(obj, dict):
+                if "rdfs:comment" in obj:
+                    comments[path] = obj["rdfs:comment"]
+                for key, value in obj.items():
+                    extract_comments(value, f"{path}.{key}" if path else key)
+            elif isinstance(obj, list):
+                for idx, item in enumerate(obj):
+                    extract_comments(item, f"{path}[{idx}]")
+        
+        extract_comments(policy)
+        
+        return {
+            "comments": comments,
+            "total": len(comments)
+        }
+    except Exception as e:
+        return {"error": f"Failed to extract comments: {str(e)}"}
+
+
+@tool
+def analyze_operator(operator: str) -> Dict[str, str]:
+    """
+    Analyze ODRL operator and map to Rego.
+    
+    Args:
+        operator: ODRL operator (e.g., "eq", "lt", "isAnyOf")
+        
+    Returns:
+        Operator analysis
+    """
+    operator_map = {
+        "eq": {"rego": "==", "description": "Equal to"},
+        "neq": {"rego": "!=", "description": "Not equal to"},
+        "lt": {"rego": "<", "description": "Less than"},
+        "lteq": {"rego": "<=", "description": "Less than or equal"},
+        "gt": {"rego": ">", "description": "Greater than"},
+        "gteq": {"rego": ">=", "description": "Greater than or equal"},
+        "isAnyOf": {"rego": "in", "description": "Member of set"},
+        "isNoneOf": {"rego": "not in", "description": "Not member of set"},
+        "isAllOf": {"rego": "all in", "description": "All members present"},
+        "isA": {"rego": "startswith", "description": "Is a type/category"}
+    }
+    
+    return operator_map.get(operator, {
+        "rego": "==",
+        "description": "Unknown operator, defaulting to equality"
+    })
+
+
+@tool
+def analyze_rightOperand(right_operand: Any) -> Dict[str, Any]:
+    """
+    Analyze rightOperand value and infer type.
+    
+    Args:
+        right_operand: The rightOperand value
+        
+    Returns:
+        Type analysis
+    """
+    if isinstance(right_operand, bool):
+        return {
+            "type": "boolean",
+            "pattern": str(right_operand).lower(),
+            "rego_function": None
+        }
+    elif isinstance(right_operand, int):
+        return {
+            "type": "integer",
+            "pattern": str(right_operand),
+            "rego_function": None
+        }
+    elif isinstance(right_operand, float):
+        return {
+            "type": "float",
+            "pattern": str(right_operand),
+            "rego_function": None
+        }
+    elif isinstance(right_operand, list):
+        # Build formatted values first to avoid backslash in f-string
+        formatted_items = []
+        for v in right_operand:
+            if isinstance(v, str):
+                formatted_items.append(f'"{v}"')
+            else:
+                formatted_items.append(str(v))
+        items_str = ', '.join(formatted_items)
+        return {
+            "type": "array",
+            "pattern": f"{{{items_str}}}",
+            "rego_function": None
+        }
+    elif isinstance(right_operand, str):
+        # Check for datetime
+        if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', right_operand):
+            return {
+                "type": "temporal_datetime",
+                "pattern": f'time.parse_rfc3339_ns("{right_operand}")',
+                "rego_function": "time.parse_rfc3339_ns"
+            }
+        # Check for duration
+        elif re.match(r'^P\d+[YMWD]', right_operand):
+            return {
+                "type": "temporal_duration",
+                "pattern": f'time.parse_duration_ns("{right_operand}")',
+                "rego_function": "time.parse_duration_ns"
+            }
+        else:
+            return {
+                "type": "string",
+                "pattern": f'"{right_operand}"',
+                "rego_function": None
+            }
+    else:
+        return {
+            "type": "unknown",
+            "pattern": str(right_operand),
+            "rego_function": None
+        }
+
+
+@tool
+def suggest_rego_pattern(left_operand: str, operator: str, right_operand: Any) -> Dict[str, Any]:
+    """
+    Suggest Rego pattern for a constraint.
+    
+    Args:
+        left_operand: Left operand
+        operator: ODRL operator
+        right_operand: Right operand value
+        
+    Returns:
+        Suggested Rego pattern
+    """
+    op_analysis = analyze_operator(operator)
+    value_analysis = analyze_rightOperand(right_operand)
+    
+    input_ref = f"input.{left_operand}" if not left_operand.startswith("input.") else left_operand
+    
+    if value_analysis["type"].startswith("temporal"):
+        if operator in ["lt", "lteq"]:
+            pattern = f'time.now_ns() {op_analysis["rego"]} {value_analysis["pattern"]}'
+        else:
+            pattern = f'{value_analysis["pattern"]} {op_analysis["rego"]} time.now_ns()'
+    elif isinstance(right_operand, list):
+        # Build formatted values first to avoid backslash in f-string
+        formatted_items = []
+        for v in right_operand:
+            if isinstance(v, str):
+                formatted_items.append(f'"{v}"')
+            else:
+                formatted_items.append(str(v))
+        items_str = ', '.join(formatted_items)
+        pattern = f'{input_ref} in {{{items_str}}}'
+    else:
+        pattern = f'{input_ref} {op_analysis["rego"]} {value_analysis["pattern"]}'
+    
+    return {
+        "rego_pattern": pattern,
+        "variables": [input_ref],
+        "functions": [value_analysis.get("rego_function")] if value_analysis.get("rego_function") else []
+    }
+
+
+@tool
+def check_rego_syntax(rego_code: str) -> Dict[str, Any]:
+    """
+    Check Rego v1 syntax requirements.
+    
+    Args:
+        rego_code: Rego code to check
+        
+    Returns:
+        Syntax check results
+    """
+    issues = []
+    
+    # Check for import rego.v1
+    if "import rego.v1" not in rego_code:
+        issues.append({
+            "severity": "error",
+            "message": "Missing 'import rego.v1' statement"
+        })
+    
+    # Check for package declaration
+    if not re.search(r'^\s*package\s+\w+', rego_code, re.MULTILINE):
+        issues.append({
+            "severity": "error",
+            "message": "Missing package declaration"
+        })
+    
+    # Check for rules without 'if' keyword
+    rule_lines = re.findall(r'^(\w+.*?)\s*{', rego_code, re.MULTILINE)
+    for rule in rule_lines:
+        if ' if ' not in rule and 'import' not in rule and 'package' not in rule:
+            issues.append({
+                "severity": "warning",
+                "message": f"Rule '{rule}' should use 'if' keyword (Rego v1)"
+            })
+    
+    return {
+        "is_valid": len([i for i in issues if i["severity"] == "error"]) == 0,
+        "issues": issues,
+        "has_import": "import rego.v1" in rego_code,
+        "has_package": "package" in rego_code
+    }
+
+
+@tool
+def fix_missing_if(rego_code: str) -> str:
+    """
+    Add missing 'if' keywords to Rego rules.
+    
+    Args:
+        rego_code: Rego code to fix
+        
+    Returns:
+        Fixed Rego code
+    """
+    lines = rego_code.split('\n')
+    fixed_lines = []
+    
+    for line in lines:
+        # Check if this is a rule definition
+        if re.match(r'^(\w+.*?)\s*{', line) and ' if ' not in line and 'import' not in line and 'package' not in line:
+            # Add 'if' before the opening brace
+            line = line.replace(' {', ' if {')
+        fixed_lines.append(line)
+    
+    return '\n'.join(fixed_lines)

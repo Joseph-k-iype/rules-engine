@@ -15,7 +15,7 @@ from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.config import OPENAI_MODEL
+from src.config import OPENAI_MODEL, Config
 from .agent_state import AgentState, ConversionStage, ODRLComponentAnalysis, RegoValidationResult
 from .rego_prompts import (
     ODRL_PARSER_PROMPT,
@@ -34,7 +34,17 @@ class ODRLParserAgent:
     """
     
     def __init__(self):
-        self.llm = ChatOpenAI(model=OPENAI_MODEL)
+        if not Config.API_KEY:
+            raise ValueError(
+                "OPENAI_API_KEY environment variable is required. "
+                "Please set it using: export OPENAI_API_KEY='your-api-key'"
+            )
+        
+        self.llm = ChatOpenAI(
+            model=OPENAI_MODEL,
+            api_key=Config.API_KEY,
+            base_url=Config.BASE_URL
+        )
         self.parser = JsonOutputParser()
     
     def parse_odrl(self, state: AgentState) -> AgentState:
@@ -106,7 +116,17 @@ class TypeInferenceAgent:
     """
     
     def __init__(self):
-        self.llm = ChatOpenAI(model=OPENAI_MODEL)
+        if not Config.API_KEY:
+            raise ValueError(
+                "OPENAI_API_KEY environment variable is required. "
+                "Please set it using: export OPENAI_API_KEY='your-api-key'"
+            )
+        
+        self.llm = ChatOpenAI(
+            model=OPENAI_MODEL,
+            api_key=Config.API_KEY,
+            base_url=Config.BASE_URL
+        )
     
     def infer_types(self, state: AgentState) -> AgentState:
         """
@@ -178,7 +198,17 @@ class LogicAnalyzerAgent:
     """
     
     def __init__(self):
-        self.llm = ChatOpenAI(model=OPENAI_MODEL)
+        if not Config.API_KEY:
+            raise ValueError(
+                "OPENAI_API_KEY environment variable is required. "
+                "Please set it using: export OPENAI_API_KEY='your-api-key'"
+            )
+        
+        self.llm = ChatOpenAI(
+            model=OPENAI_MODEL,
+            api_key=Config.API_KEY,
+            base_url=Config.BASE_URL
+        )
     
     def analyze_logic(self, state: AgentState) -> AgentState:
         """
@@ -245,7 +275,17 @@ class RegoGeneratorAgent:
     """
     
     def __init__(self):
-        self.llm = ChatOpenAI(model=OPENAI_MODEL)
+        if not Config.API_KEY:
+            raise ValueError(
+                "OPENAI_API_KEY environment variable is required. "
+                "Please set it using: export OPENAI_API_KEY='your-api-key'"
+            )
+        
+        self.llm = ChatOpenAI(
+            model=OPENAI_MODEL,
+            api_key=Config.API_KEY,
+            base_url=Config.BASE_URL
+        )
         self.parser = StrOutputParser()
     
     def generate_rego(self, state: AgentState) -> AgentState:
@@ -341,7 +381,17 @@ class ReflectionAgent:
     """
     
     def __init__(self):
-        self.llm = ChatOpenAI(model=OPENAI_MODEL)
+        if not Config.API_KEY:
+            raise ValueError(
+                "OPENAI_API_KEY environment variable is required. "
+                "Please set it using: export OPENAI_API_KEY='your-api-key'"
+            )
+        
+        self.llm = ChatOpenAI(
+            model=OPENAI_MODEL,
+            api_key=Config.API_KEY,
+            base_url=Config.BASE_URL
+        )
     
     def validate_rego(self, state: AgentState) -> AgentState:
         """
@@ -417,7 +467,17 @@ class CorrectionAgent:
     """
     
     def __init__(self):
-        self.llm = ChatOpenAI(model=OPENAI_MODEL)
+        if not Config.API_KEY:
+            raise ValueError(
+                "OPENAI_API_KEY environment variable is required. "
+                "Please set it using: export OPENAI_API_KEY='your-api-key'"
+            )
+        
+        self.llm = ChatOpenAI(
+            model=OPENAI_MODEL,
+            api_key=Config.API_KEY,
+            base_url=Config.BASE_URL
+        )
     
     def correct_rego(self, state: AgentState) -> AgentState:
         """
