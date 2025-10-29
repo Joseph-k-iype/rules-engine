@@ -1,7 +1,7 @@
 """
-Enhanced ReAct Workflow with Coverage-Based Rules, AST Validation, and Mixture of Experts
+Enhanced ReAct Workflow with Coverage-Based Rules, AST Validation, and Clean Code Extraction
 Uses OpenAI o3-mini reasoning model from config.py
-NO temperature or max_tokens parameters - relies on model's reasoning capabilities
+Ensures ONLY valid Rego code is generated (no explanations or reasoning in output files)
 """
 import json
 import sys
@@ -59,9 +59,12 @@ from ..prompting.odrl_rego_strategies import (
     AST_EXPERT_PROMPT
 )
 
+# Import extraction utilities
+from ..utils.rego_extractor import extract_and_validate_rego, RegoExtractor, RegoValidator
+
 
 # ============================================================================
-# Configuration (NO temperature or max_tokens)
+# Configuration
 # ============================================================================
 
 def get_llm_for_agent():
@@ -101,17 +104,13 @@ def get_agent_config():
 def create_coverage_parser_agent():
     """
     Create agent for parsing ODRL with coverage-first approach.
-    Extracts jurisdictions and groups rules by coverage+action.
     """
     llm = get_llm_for_agent()
     
     tools = [
-        extract_coverage_and_jurisdictions,  # PRIMARY TOOL
+        extract_coverage_and_jurisdictions,
         extract_custom_original_data,
-        generate_regex_patterns_for_jurisdictions,
         extract_policy_metadata,
-        extract_and_infer_constraints_with_coverage,
-        generate_ast_from_policy,
         analyze_rdfs_comments
     ]
     
@@ -128,16 +127,12 @@ def create_coverage_parser_agent():
 
 
 def create_jurisdiction_expert_agent():
-    """
-    Create specialized expert for jurisdiction/coverage analysis.
-    Part of Mixture of Experts pattern.
-    """
+    """Create jurisdiction/coverage expert agent."""
     llm = get_llm_for_agent()
     
     tools = [
         extract_coverage_and_jurisdictions,
-        generate_regex_patterns_for_jurisdictions,
-        traverse_ast_by_coverage
+        generate_regex_patterns_for_jurisdictions
     ]
     
     checkpointer = MemorySaver()
@@ -153,9 +148,7 @@ def create_jurisdiction_expert_agent():
 
 
 def create_regex_expert_agent():
-    """
-    Create specialized expert for regex pattern generation.
-    """
+    """Create regex pattern expert agent."""
     llm = get_llm_for_agent()
     
     tools = [
@@ -175,13 +168,12 @@ def create_regex_expert_agent():
 
 
 def create_type_system_expert_agent():
-    """
-    Create specialized expert for type inference.
-    """
+    """Create type system expert agent."""
     llm = get_llm_for_agent()
     
     tools = [
-        extract_and_infer_constraints_with_coverage
+        extract_and_infer_constraints_with_coverage,
+        analyze_rdfs_comments
     ]
     
     checkpointer = MemorySaver()
@@ -197,14 +189,12 @@ def create_type_system_expert_agent():
 
 
 def create_logic_expert_agent():
-    """
-    Create specialized expert for logical consistency analysis.
-    """
+    """Create logic validation expert agent."""
     llm = get_llm_for_agent()
     
     tools = [
         validate_ast_logic,
-        extract_and_infer_constraints_with_coverage
+        extract_custom_original_data
     ]
     
     checkpointer = MemorySaver()
@@ -220,9 +210,7 @@ def create_logic_expert_agent():
 
 
 def create_ast_expert_agent():
-    """
-    Create specialized expert for AST validation.
-    """
+    """Create AST expert agent."""
     llm = get_llm_for_agent()
     
     tools = [
@@ -245,17 +233,15 @@ def create_ast_expert_agent():
 
 def create_mixture_of_experts_orchestrator():
     """
-    Create MoE orchestrator agent that coordinates expert consultations.
+    Create mixture of experts orchestrator agent.
     """
     llm = get_llm_for_agent()
     
-    # MoE orchestrator has access to all tools but delegates to experts
+    # Note: This agent doesn't call tools directly, but coordinates other agents
+    # We give it basic tools for validation
     tools = [
         extract_coverage_and_jurisdictions,
-        generate_regex_patterns_for_jurisdictions,
-        extract_and_infer_constraints_with_coverage,
-        generate_ast_from_policy,
-        validate_ast_logic
+        extract_custom_original_data
     ]
     
     checkpointer = MemorySaver()
@@ -272,7 +258,7 @@ def create_mixture_of_experts_orchestrator():
 
 def create_coverage_based_rego_generator():
     """
-    Create Rego generator agent with coverage-based approach.
+    Create coverage-based Rego generator agent.
     """
     llm = get_llm_for_agent()
     
@@ -296,9 +282,7 @@ def create_coverage_based_rego_generator():
 
 
 def create_ast_validation_agent():
-    """
-    Create AST validation agent.
-    """
+    """Create AST validation agent."""
     llm = get_llm_for_agent()
     
     tools = [
@@ -320,9 +304,7 @@ def create_ast_validation_agent():
 
 
 def create_reflection_agent():
-    """
-    Create self-reflection agent for validation.
-    """
+    """Create self-reflection agent for validation."""
     llm = get_llm_for_agent()
     
     tools = [
@@ -344,9 +326,7 @@ def create_reflection_agent():
 
 
 def create_correction_agent():
-    """
-    Create correction agent for fixing issues.
-    """
+    """Create correction agent for fixing issues."""
     llm = get_llm_for_agent()
     
     tools = [
@@ -376,159 +356,112 @@ def create_correction_agent():
 def consult_experts(odrl_json: Dict[str, Any]) -> Dict[str, Any]:
     """
     Consult multiple expert agents and synthesize their analyses.
-    
-    Args:
-        odrl_json: ODRL policy
-        
-    Returns:
-        Aggregated expert analyses with consensus
     """
-    odrl_str = json.dumps(odrl_json)
     config = get_agent_config()
-    
-    # Create expert agents
-    jurisdiction_expert = create_jurisdiction_expert_agent()
-    regex_expert = create_regex_expert_agent()
-    type_expert = create_type_system_expert_agent()
-    logic_expert = create_logic_expert_agent()
-    ast_expert = create_ast_expert_agent()
-    
     expert_analyses = {}
     
-    # Consult jurisdiction expert
     try:
-        jurisdiction_query = f"Analyze the jurisdictions and coverage in this ODRL policy:\n{odrl_str}"
+        # Prepare policy string
+        policy_str = json.dumps(odrl_json, indent=2)
+        
+        # Consult Jurisdiction Expert
+        jurisdiction_expert = create_jurisdiction_expert_agent()
+        jurisdiction_query = f"Analyze jurisdiction/coverage patterns in:\n{policy_str}"
         jurisdiction_result = jurisdiction_expert.invoke(
             {"messages": [HumanMessage(content=jurisdiction_query)]},
             config=config
         )
-        expert_analyses["jurisdiction_expert"] = {
-            "analysis": jurisdiction_result["messages"][-1].content,
-            "expert_type": "jurisdiction"
-        }
-    except Exception as e:
-        expert_analyses["jurisdiction_expert"] = {"error": str(e)}
-    
-    # Consult regex expert
-    try:
-        regex_query = f"Generate regex patterns for jurisdictions in this ODRL policy:\n{odrl_str}"
-        regex_result = regex_expert.invoke(
-            {"messages": [HumanMessage(content=regex_query)]},
-            config=config
-        )
-        expert_analyses["regex_expert"] = {
-            "analysis": regex_result["messages"][-1].content,
-            "expert_type": "regex"
-        }
-    except Exception as e:
-        expert_analyses["regex_expert"] = {"error": str(e)}
-    
-    # Consult type system expert
-    try:
-        type_query = f"Infer types and constraints in this ODRL policy:\n{odrl_str}"
+        expert_analyses['jurisdiction'] = jurisdiction_result["messages"][-1].content
+        
+        # Consult Type System Expert
+        type_expert = create_type_system_expert_agent()
+        type_query = f"Infer types for all constraints in:\n{policy_str}"
         type_result = type_expert.invoke(
             {"messages": [HumanMessage(content=type_query)]},
             config=config
         )
-        expert_analyses["type_expert"] = {
-            "analysis": type_result["messages"][-1].content,
-            "expert_type": "type_system"
-        }
-    except Exception as e:
-        expert_analyses["type_expert"] = {"error": str(e)}
-    
-    # Consult logic expert
-    try:
-        logic_query = f"Analyze logical consistency in this ODRL policy:\n{odrl_str}"
+        expert_analyses['types'] = type_result["messages"][-1].content
+        
+        # Consult Logic Expert
+        logic_expert = create_logic_expert_agent()
+        logic_query = f"Validate logical consistency of:\n{policy_str}"
         logic_result = logic_expert.invoke(
             {"messages": [HumanMessage(content=logic_query)]},
             config=config
         )
-        expert_analyses["logic_expert"] = {
-            "analysis": logic_result["messages"][-1].content,
-            "expert_type": "logic"
-        }
-    except Exception as e:
-        expert_analyses["logic_expert"] = {"error": str(e)}
-    
-    # Consult AST expert
-    try:
-        ast_query = f"Validate AST structure for this ODRL policy:\n{odrl_str}"
+        expert_analyses['logic'] = logic_result["messages"][-1].content
+        
+        # Consult AST Expert
+        ast_expert = create_ast_expert_agent()
+        ast_query = f"Generate and validate AST for:\n{policy_str}"
         ast_result = ast_expert.invoke(
             {"messages": [HumanMessage(content=ast_query)]},
             config=config
         )
-        expert_analyses["ast_expert"] = {
-            "analysis": ast_result["messages"][-1].content,
-            "expert_type": "ast"
-        }
+        expert_analyses['ast'] = ast_result["messages"][-1].content
+        
     except Exception as e:
-        expert_analyses["ast_expert"] = {"error": str(e)}
+        expert_analyses['error'] = str(e)
     
-    # Synthesize expert opinions
-    consensus = {
-        "expert_count": len(expert_analyses),
-        "consensus_reached": all("error" not in analysis for analysis in expert_analyses.values()),
-        "confidence": sum(1 for analysis in expert_analyses.values() if "error" not in analysis) / len(expert_analyses)
-    }
-    
-    return {
-        "experts": expert_analyses,
-        "consensus": consensus
-    }
+    return expert_analyses
 
 
 # ============================================================================
-# Main Conversion Workflow
+# Main Conversion Function with Clean Code Extraction
 # ============================================================================
 
 def convert_odrl_to_rego_with_coverage(
     odrl_json: Dict[str, Any],
+    existing_rego: str = None,
     use_mixture_of_experts: bool = True,
     verbose: bool = False
 ) -> Dict[str, Any]:
     """
     Convert ODRL policy to Rego using coverage-based approach.
     
+    CRITICAL: Extracts ONLY valid Rego code, removing all explanations and reasoning.
+    
     Args:
-        odrl_json: ODRL policy as JSON
-        use_mixture_of_experts: Whether to use MoE pattern
-        verbose: Print detailed reasoning chains
+        odrl_json: ODRL policy in JSON-LD format
+        existing_rego: Optional existing Rego code to append to
+        use_mixture_of_experts: Whether to consult expert agents
+        verbose: Print detailed progress
         
     Returns:
-        Conversion result with Rego code and metadata
+        Dict with conversion results
     """
     result = {
         "success": False,
-        "policy_id": odrl_json.get("@id", "unknown"),
+        "policy_id": odrl_json.get("uid", odrl_json.get("@id", "unknown")),
         "generated_rego": "",
         "messages": [],
         "reasoning_chain": [],
         "logical_issues": [],
         "correction_attempts": 0,
         "stage_reached": "initialization",
-        "expert_analyses": None
+        "expert_analyses": {}
     }
     
     config = get_agent_config()
     
     try:
+        # Prepare policy string
         odrl_str = json.dumps(odrl_json, indent=2)
         
-        # Stage 1: Parse ODRL with coverage extraction
+        # Stage 1: Parser Analysis
         result["stage_reached"] = "parsing"
-        result["messages"].append("Stage 1: Parsing ODRL with coverage-based approach...")
+        result["messages"].append("Stage 1: Parsing ODRL policy...")
         
-        parser_agent = create_coverage_parser_agent()
-        parser_query = f"Parse this ODRL policy and extract coverage/jurisdictions:\n{odrl_str}"
-        parser_result = parser_agent.invoke(
+        parser = create_coverage_parser_agent()
+        parser_query = f"Parse and analyze this ODRL policy:\n{odrl_str}"
+        parser_result = parser.invoke(
             {"messages": [HumanMessage(content=parser_query)]},
             config=config
         )
         parser_content = parser_result["messages"][-1].content
         
         if verbose:
-            print(f"\n[Parser Agent]\n{parser_content}\n")
+            print(f"\n[Parser Analysis]\n{parser_content}\n")
         
         result["reasoning_chain"].append({
             "stage": "parsing",
@@ -545,19 +478,14 @@ def convert_odrl_to_rego_with_coverage(
             
             if verbose:
                 print(f"\n[Expert Analyses]\n{json.dumps(expert_analyses, indent=2)}\n")
-            
-            result["reasoning_chain"].append({
-                "stage": "expert_consultation",
-                "reasoning": json.dumps(expert_analyses, indent=2)
-            })
         
         # Stage 3: AST Validation
         result["stage_reached"] = "ast_validation"
-        result["messages"].append("Stage 3: Validating AST structure...")
+        result["messages"].append("Stage 3: Validating policy structure via AST...")
         
-        ast_agent = create_ast_validation_agent()
-        ast_query = f"Generate and validate AST for this ODRL policy:\n{odrl_str}"
-        ast_result = ast_agent.invoke(
+        ast_validator = create_ast_validation_agent()
+        ast_query = f"Validate AST for:\n{odrl_str}"
+        ast_result = ast_validator.invoke(
             {"messages": [HumanMessage(content=ast_query)]},
             config=config
         )
@@ -582,7 +510,12 @@ def convert_odrl_to_rego_with_coverage(
         if use_mixture_of_experts and result["expert_analyses"]:
             context += f"\n\nExpert Analyses:\n{json.dumps(result['expert_analyses'], indent=2)}"
         
-        rego_query = f"Generate coverage-based Rego code for:\n{context}"
+        # Add instruction to output ONLY Rego code
+        rego_query = f"""Generate coverage-based Rego code for:\n{context}
+
+CRITICAL: Output ONLY valid Rego code. NO explanations, NO reasoning, NO markdown.
+Start with 'package' declaration and include ONLY Rego syntax."""
+        
         generator_result = generator.invoke(
             {"messages": [HumanMessage(content=rego_query)]},
             config=config
@@ -590,20 +523,20 @@ def convert_odrl_to_rego_with_coverage(
         generator_content = generator_result["messages"][-1].content
         
         if verbose:
-            print(f"\n[Rego Generator]\n{generator_content}\n")
+            print(f"\n[Rego Generator Raw Output]\n{generator_content}\n")
         
-        # Extract Rego code
-        if "```rego" in generator_content:
-            rego_code = generator_content.split("```rego")[1].split("```")[0].strip()
-        elif "```" in generator_content:
-            rego_code = generator_content.split("```")[1].strip()
-        else:
-            rego_code = generator_content
+        # CRITICAL: Extract ONLY Rego code, remove all explanations
+        extraction_result = extract_and_validate_rego(generator_content, verbose=verbose)
+        rego_code = extraction_result['rego_code']
+        
+        if not extraction_result['extracted_successfully']:
+            result["messages"].append("⚠ Warning: Rego extraction may be incomplete")
         
         result["generated_rego"] = rego_code
         result["reasoning_chain"].append({
             "stage": "rego_generation",
-            "reasoning": generator_content
+            "reasoning": generator_content,
+            "extraction_result": extraction_result
         })
         
         # Stage 5: Self-Reflection & Validation
@@ -641,7 +574,8 @@ def convert_odrl_to_rego_with_coverage(
             for attempt in range(max_corrections):
                 result["correction_attempts"] = attempt + 1
                 
-                correction_query = f"""The following Rego code has issues:
+                correction_query = f"""Fix issues in this Rego code:
+
 ```rego
 {result['generated_rego']}
 ```
@@ -649,14 +583,7 @@ def convert_odrl_to_rego_with_coverage(
 Issues identified:
 {reflection_content}
 
-Please fix:
-1. Coverage/jurisdiction logic
-2. Regex patterns
-3. Type handling
-4. Logical issues
-5. Syntax errors
-
-Provide corrected code with reasoning."""
+CRITICAL: Output ONLY corrected Rego code. NO explanations."""
                 
                 correction_result = correction_agent.invoke(
                     {"messages": [HumanMessage(content=correction_query)]},
@@ -665,17 +592,14 @@ Provide corrected code with reasoning."""
                 corrected_content = correction_result["messages"][-1].content
                 
                 # Extract corrected code
-                if "```rego" in corrected_content:
-                    corrected_code = corrected_content.split("```rego")[1].split("```")[0].strip()
-                elif "```" in corrected_content:
-                    corrected_code = corrected_content.split("```")[1].strip()
-                else:
-                    corrected_code = corrected_content
+                corrected_extraction = extract_and_validate_rego(corrected_content, verbose=verbose)
+                corrected_code = corrected_extraction['rego_code']
                 
                 result["generated_rego"] = corrected_code
                 result["reasoning_chain"].append({
                     "stage": f"correction_{attempt + 1}",
-                    "reasoning": corrected_content
+                    "reasoning": corrected_content,
+                    "extraction_result": corrected_extraction
                 })
                 
                 # Re-validate
@@ -693,6 +617,13 @@ Provide corrected code with reasoning."""
             result["messages"].append(f"Correction attempts: {result['correction_attempts']}")
         else:
             result["messages"].append("✓ Validation passed, no corrections needed")
+        
+        # Final validation
+        final_validation = RegoValidator.validate_syntax(result["generated_rego"])
+        if not final_validation['valid']:
+            result["messages"].append("⚠ Final validation found issues:")
+            for error in final_validation['errors']:
+                result["messages"].append(f"  ✗ {error}")
         
         # Final stage
         result["stage_reached"] = "completed"
@@ -717,136 +648,124 @@ def convert_odrl_file_to_rego(
     """
     Convert ODRL file to Rego file with coverage-based approach.
     Handles both single policies and arrays of policies.
-    
-    Args:
-        input_file: Path to ODRL JSON file
-        output_file: Path to output Rego file (default: input_file.rego)
-        existing_rego_file: Path to existing Rego file to append to
-        use_mixture_of_experts: Whether to use MoE pattern
-        verbose: Print detailed reasoning chains
-        
-    Returns:
-        Conversion result
     """
-    # Read ODRL policy
     try:
-        with open(input_file, 'r') as f:
-            odrl_data = json.load(f)
+        # Read input file
+        with open(input_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
         
-        # Handle both single policies and arrays of policies
-        policies_to_convert = []
-        if isinstance(odrl_data, list):
-            print(f"ℹ️ Input file contains {len(odrl_data)} policies. Processing all...")
-            policies_to_convert = [p for p in odrl_data if isinstance(p, dict)]
-            if len(policies_to_convert) != len(odrl_data):
-                print(f"⚠️ Warning: Skipped {len(odrl_data) - len(policies_to_convert)} invalid items")
-        elif isinstance(odrl_data, dict):
-            policies_to_convert = [odrl_data]
-        else:
-            print(f"✗ Error: Input file must contain a JSON object or array, got {type(odrl_data).__name__}")
-            return {
-                "success": False,
-                "policy_id": "unknown",
-                "error_message": f"Invalid JSON structure: {type(odrl_data).__name__}",
-                "stage_reached": "file_reading",
-                "messages": [],
-                "reasoning_chain": [],
-                "correction_attempts": 0
-            }
-    
-    except json.JSONDecodeError as e:
-        print(f"✗ Error: Invalid JSON in input file: {e}")
-        return {
-            "success": False,
-            "policy_id": "unknown",
-            "error_message": f"Invalid JSON: {str(e)}",
-            "stage_reached": "file_reading",
-            "messages": [],
-            "reasoning_chain": [],
-            "correction_attempts": 0
-        }
-    except FileNotFoundError:
-        print(f"✗ Error: File not found: {input_file}")
-        return {
-            "success": False,
-            "policy_id": "unknown",
-            "error_message": f"File not found: {input_file}",
-            "stage_reached": "file_reading",
-            "messages": [],
-            "reasoning_chain": [],
-            "correction_attempts": 0
-        }
-    
-    # Convert all policies
-    all_results = []
-    all_rego_code = []
-    
-    for idx, odrl_json in enumerate(policies_to_convert, 1):
-        policy_id = odrl_json.get("@id", f"policy_{idx}")
-        print(f"\n{'='*80}")
-        print(f"Processing policy {idx}/{len(policies_to_convert)}: {policy_id}")
-        print(f"{'='*80}")
+        # Handle both single policy and array of policies
+        policies = data if isinstance(data, list) else [data]
         
-        result = convert_odrl_to_rego_with_coverage(
-            odrl_json=odrl_json,
-            use_mixture_of_experts=use_mixture_of_experts,
-            verbose=verbose
-        )
-        
-        all_results.append(result)
-        
-        if result["success"]:
-            all_rego_code.append(f"\n# {'='*60}\n# Policy: {policy_id}\n# {'='*60}\n\n{result['generated_rego']}")
-            print(f"✓ Successfully converted policy {idx}")
-        else:
-            print(f"✗ Failed to convert policy {idx}: {result.get('error_message', 'Unknown error')}")
-    
-    # Aggregate results
-    successful = sum(1 for r in all_results if r["success"])
-    failed = len(all_results) - successful
-    
-    aggregated_result = {
-        "success": successful > 0,
-        "policy_id": f"{successful}/{len(all_results)} policies",
-        "generated_rego": "\n".join(all_rego_code),
-        "messages": [
-            f"Processed {len(all_results)} policies",
-            f"✓ Successful: {successful}",
-            f"✗ Failed: {failed}" if failed > 0 else "✓ All policies converted successfully"
-        ],
-        "reasoning_chain": [r["reasoning_chain"] for r in all_results],
-        "logical_issues": [issue for r in all_results for issue in r.get("logical_issues", [])],
-        "correction_attempts": sum(r.get("correction_attempts", 0) for r in all_results),
-        "stage_reached": "completed",
-        "individual_results": all_results
-    }
-    
-    if not aggregated_result["success"]:
-        return aggregated_result
-    
-    # Write to output file
-    if output_file is None:
-        output_file = input_file.replace('.json', '.rego')
-    
-    try:
-        # Read existing rego if specified
-        existing_content = ""
+        # Read existing rego if provided
+        existing_rego = None
         if existing_rego_file:
             try:
-                with open(existing_rego_file, 'r') as f:
-                    existing_content = f.read() + "\n\n"
+                with open(existing_rego_file, 'r', encoding='utf-8') as f:
+                    existing_rego = f.read()
             except FileNotFoundError:
-                print(f"⚠ Warning: Existing rego file not found: {existing_rego_file}")
+                pass
         
-        # Write output
-        with open(output_file, 'w') as f:
-            f.write(existing_content + aggregated_result["generated_rego"])
+        # Convert each policy
+        all_results = []
+        all_rego_code = []
         
-        aggregated_result["messages"].append(f"✓ Rego code written to: {output_file}")
+        for i, policy in enumerate(policies, 1):
+            if verbose:
+                print(f"\n{'='*80}")
+                print(f"Converting Policy {i}/{len(policies)}")
+                print(f"{'='*80}")
+            
+            result = convert_odrl_to_rego_with_coverage(
+                odrl_json=policy,
+                existing_rego=existing_rego if i == 1 else None,
+                use_mixture_of_experts=use_mixture_of_experts,
+                verbose=verbose
+            )
+            
+            all_results.append(result)
+            
+            if result["success"]:
+                all_rego_code.append(result["generated_rego"])
+        
+        # Combine all Rego code
+        combined_rego = "\n\n# " + "="*78 + "\n\n".join(all_rego_code) if len(all_rego_code) > 1 else all_rego_code[0] if all_rego_code else ""
+        
+        # Aggregate results
+        successful = sum(1 for r in all_results if r["success"])
+        failed = len(all_results) - successful
+        
+        aggregated_result = {
+            "success": failed == 0,
+            "generated_rego": combined_rego,
+            "messages": [
+                f"Processed {len(all_results)} policies",
+                f"✓ Successful: {successful}",
+                f"✗ Failed: {failed}" if failed > 0 else "✓ All policies converted successfully"
+            ],
+            "reasoning_chain": [r["reasoning_chain"] for r in all_results],
+            "logical_issues": [issue for r in all_results for issue in r.get("logical_issues", [])],
+            "correction_attempts": sum(r.get("correction_attempts", 0) for r in all_results),
+            "stage_reached": "completed",
+            "individual_results": all_results
+        }
+        
+        if not aggregated_result["success"]:
+            return aggregated_result
+        
+        # Write to output file
+        if output_file is None:
+            output_file = input_file.replace('.json', '.rego')
+        
+        try:
+            # Read existing rego if specified
+            existing_content = ""
+            if existing_rego_file:
+                try:
+                    with open(existing_rego_file, 'r', encoding='utf-8') as f:
+                        existing_content = f.read() + "\n\n"
+                except FileNotFoundError:
+                    print(f"⚠  Warning: Existing rego file not found: {existing_rego_file}")
+            
+            # Write output with UTF-8 encoding
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(existing_content + aggregated_result["generated_rego"])
+            
+            aggregated_result["messages"].append(f"✓ Rego code written to: {output_file}")
+            
+        except Exception as e:
+            aggregated_result["success"] = False
+            aggregated_result["error_message"] = f"Failed to write output file: {str(e)}"
+            aggregated_result["messages"].append(f"✗ Error writing output: {str(e)}")
+        
+        return aggregated_result
         
     except Exception as e:
-        aggregated_result["success"] = False
-        aggregated_result["error_message"] = f"Failed to write output file: {str(e)}"
-        aggregated_result["messages"].append(f"✗ Error writing output: {str(e)}")
-    
-    return aggregated_result
+        return {
+            "success": False,
+            "error_message": str(e),
+            "messages": [f"✗ Failed to read input file: {str(e)}"],
+            "generated_rego": "",
+            "reasoning_chain": [],
+            "logical_issues": [],
+            "correction_attempts": 0,
+            "stage_reached": "file_reading"
+        }
+
+
+__all__ = [
+    "convert_odrl_to_rego_with_coverage",
+    "convert_odrl_file_to_rego",
+    "consult_experts",
+    "create_coverage_parser_agent",
+    "create_jurisdiction_expert_agent",
+    "create_regex_expert_agent",
+    "create_type_system_expert_agent",
+    "create_logic_expert_agent",
+    "create_ast_expert_agent",
+    "create_mixture_of_experts_orchestrator",
+    "create_coverage_based_rego_generator",
+    "create_ast_validation_agent",
+    "create_reflection_agent",
+    "create_correction_agent",
+]

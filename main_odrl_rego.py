@@ -80,9 +80,20 @@ def cli_convert(args):
                     print(f"\nPolicy {idx}: {individual_result['policy_id']}")
                     print(f"  Status: {status}")
                     print(f"  Stage Reached: {individual_result['stage_reached']}")
-                    if individual_result.get("expert_analyses"):
-                        print(f"  Expert Consultations: {individual_result['expert_analyses']['expert_count']}")
-                        print(f"  Expert Consensus: {individual_result['expert_analyses']['consensus']['consensus_reached']}")
+                    
+                    # Safely access expert_analyses
+                    expert_analyses = individual_result.get("expert_analyses")
+                    if expert_analyses and isinstance(expert_analyses, dict):
+                        expert_count = expert_analyses.get("expert_count")
+                        if expert_count is not None:
+                            print(f"  Expert Consultations: {expert_count}")
+                        
+                        consensus = expert_analyses.get("consensus")
+                        if consensus and isinstance(consensus, dict):
+                            consensus_reached = consensus.get("consensus_reached")
+                            if consensus_reached is not None:
+                                print(f"  Expert Consensus: {consensus_reached}")
+                    
                     if not individual_result["success"]:
                         print(f"  Error: {individual_result.get('error_message', 'Unknown error')}")
             else:
@@ -92,10 +103,21 @@ def cli_convert(args):
                 print(f"✓ Stage Reached: {result['stage_reached']}")
                 print(f"✓ Correction Attempts: {result['correction_attempts']}")
                 
-                if result.get("expert_analyses"):
-                    print(f"✓ Expert Consultations: {result['expert_analyses']['expert_count']}")
-                    print(f"✓ Expert Consensus: {result['expert_analyses']['consensus']['consensus_reached']}")
-                    print(f"✓ Confidence: {result['expert_analyses']['consensus']['confidence']:.2f}")
+                # Safely access expert_analyses for single policy
+                expert_analyses = result.get("expert_analyses")
+                if expert_analyses and isinstance(expert_analyses, dict):
+                    expert_count = expert_analyses.get("expert_count")
+                    if expert_count is not None:
+                        print(f"✓ Expert Consultations: {expert_count}")
+                    
+                    consensus = expert_analyses.get("consensus")
+                    if consensus and isinstance(consensus, dict):
+                        consensus_reached = consensus.get("consensus_reached")
+                        confidence = consensus.get("confidence")
+                        if consensus_reached is not None:
+                            print(f"✓ Expert Consensus: {consensus_reached}")
+                        if confidence is not None:
+                            print(f"✓ Confidence: {confidence:.2f}")
             
             print("="*80)
             
@@ -127,7 +149,7 @@ def cli_analyze(args):
         return 1
     
     try:
-        with open(input_file, 'r') as f:
+        with open(input_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
         # Handle both single policy and array of policies
